@@ -1,4 +1,4 @@
-import pickle 
+.import pickle 
 import os 
 from torch.utils.data import Dataset
 from PIL import Image
@@ -31,7 +31,7 @@ class ImageNet_dataset(Dataset):
     def __getitem__(self, idx):
         
         image_name = list(self.data.keys())[idx]
-        image_gt = data[list(self.data.keys())[idx]]
+        image_gt = self.data[list(self.data.keys())[idx]]
         img_name = os.path.join(self.db_path,image_name+'.JPEG')
         
         image = Image.open(img_name)
