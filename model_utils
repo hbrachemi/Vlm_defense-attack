@@ -1,0 +1,44 @@
+from transformers import AutoProcessor, LlavaForConditionalGeneration, InstructBlipProcessor, InstructBlipForConditionalGeneration #LlavaNextProcessor, LlavaNextForConditionalGeneration
+
+def vlm_pretrained(vlm:str):
+    match vlm:
+        case "instruct_blip":
+            model = InstructBlipForConditionalGeneration.from_pretrained("Salesforce/instructblip-vicuna-7b",device_map='auto')
+            processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-vicuna-7b",device_map='auto')
+        case "Llava-7b":
+            model = LlavaForConditionalGeneration.from_pretrained("llava-hf/llava-1.5-7b-hf",device_map = 'auto')
+            processor = AutoProcessor.from_pretrained(pretrained_model_name_or_path="llava-hf/llava-1.5-7b-hf",device_map = 'auto')
+        case "Llava-13b":
+            model = LlavaForConditionalGeneration.from_pretrained("llava-hf/llava-v1.6-vicuna-13b-hf",device_map = 'auto')
+            processor = LlavaNextProcessor.from_pretrained(pretrained_model_name_or_path="llava-hf/llava-v1.6-vicuna-13b-hf",device_map = 'auto')
+        
+    model = model.eval()
+    return model,processor
+
+
+def encoder_QKV(vlm:str,model):
+    
+    encoder_QKV_dict = {}
+    match vlm:
+        case "Llava-7b":
+            encoder = model.get_submodule("vision_tower")
+            decoder = model.get_submodule("language_model")
+
+            encoder_leaf_nodes = [module for module in encoder.modules()
+                  if len(list(module.children())) == 0]
+            decoder_leaf_nodes = [module for module in decoder.modules()
+                  if len(list(module.children())) == 0]
+
+            encoder_K = [encoder_leaf_nodes[3+i*9] for i in range(24)]
+            encoder_V = [encoder_leaf_nodes[4+i*9] for i in range(24)] 
+            encoder_Q = [encoder_leaf_nodes[5+i*9] for i in range(24)]
+            encoder_layer_norm = [encoder_leaf_nodes[7+i*9] for i in range(24)]
+        
+        case _:
+            raise Exception("Sorry the provided vlm is not within this list, try extracting the QKV layers manually")
+            
+
+    encoder_QKV_dict['K'] = encoder_K
+    encoder_QKV_dict['Q'] = encoder_Q
+    encoder_QKV_dict['V'] = encoder_V
+    return encoder_QKV_dict
