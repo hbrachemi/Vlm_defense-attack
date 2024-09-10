@@ -73,11 +73,11 @@ def get_word_index(processor,word):
 
 from PIL import ImageDraw,Image
 
-def evaluate_image(model,processor,label,path,kw_args=None,other_prompts=None):
+def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompts=None):
     
-    image = Image.open(f"{path}.png")
+    image = Image.open(f"{path_img}")
     
-    with open(f"{path}.txt", 'w') as file:
+    with open(f"{path}", 'w') as file:
                         file.write(f"Label: {label}\n\n\n")
                         file.flush()
 
@@ -120,13 +120,13 @@ import torchvision
 
 def save_image(image,path,normalized=False,processor=None):
     if not normalized:
-        torchvision.utils.save_image(image,f"{path}.png")
+        torchvision.utils.save_image(image,f"{path}")
     if normalized and processor is not None:
         image = torch.clone(image)
         for c in range(3):
             image[0,c,:] *= processor.image_processor.image_std[c]
             image[0,c,:] += processor.image_processor.image_mean[c]
-            torchvision.utils.save_image(image,f"{path}.png")
+            torchvision.utils.save_image(image,f"{path}")
 
 
 from matplotlib import pyplot as plt
@@ -167,8 +167,8 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
     start = time.time()
     early_stopping = EarlyStopping(patience=5, delta=0.001)
 
-    save_image(im,f"{path}/predictions/{img_name}_step_{0}",normalized=True,processor=processor)
-    evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{0}")
+    save_image(im,f"{path}/adv_img/{img_name}_step_{0}.png",normalized=True,processor=processor)
+    evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{0}.txt",f"{path}/adv_img/{img_name}_step_{0}.png")
 
 
     
@@ -235,8 +235,8 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                 end = time.time()
 
                 kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
-                save_image(im,f"{path}/predictions/{img_name}_step_{0}",normalized=True,processor=processor)
-                evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}",kw_args)
+                save_image(im,f"{path}/adv_img/{img_name}_step_{0}.png",normalized=True,processor=processor)
+                evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}.txt",f"{path}/adv_img/{img_name}_step_{0}.png",kw_args)
 
                 loss_dict = {"overall":loss}
                 if lambda_a !=0:
@@ -253,6 +253,6 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
     best_image = early_stopping.best_image
     end = time.time()
     kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
-    save_image(im,f"{path}/best/{img_name}_best",normalized=True,processor=processor)
-    evaluate_image(model,processor,GT_data[label[0]],f"{path}/best/{img_name}_best",kw_args,possible_prompts)
+    save_image(im,f"{path}/best/{img_name}_best.png",normalized=True,processor=processor)
+    evaluate_image(model,processor,GT_data[label[0]],f"{path}/best/{img_name}_best.txt",f"{path}/best/{img_name}_best.png",kw_args,possible_prompts)
     return best_image, end-start
