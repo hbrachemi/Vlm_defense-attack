@@ -235,8 +235,8 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                 end = time.time()
 
                 kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
-                save_image(im,f"{path}/adv_img/{img_name}_step_{0}.png",normalized=True,processor=processor)
-                evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}.txt",f"{path}/adv_img/{img_name}_step_{0}.png",kw_args)
+                save_image(im,f"{path}/adv_img/{img_name}_step_{step+1}.png",normalized=True,processor=processor)
+                evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}.txt",f"{path}/adv_img/{img_name}_step_{step+1}.png",kw_args)
 
                 loss_dict = {"overall":loss_hist}
                 if lambda_a !=0:
