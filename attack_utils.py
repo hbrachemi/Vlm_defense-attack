@@ -145,7 +145,7 @@ from losses import *
 from tqdm import tqdm
 import time
 
-def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean'):
+def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5):
     
     list_patches = get_target_patches(image,boxes,w,h,patch_dim)
     means = processor.image_processor.image_mean
@@ -170,7 +170,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
     entropy_loss = CustomEntropyLoss(target_token_indices=list_patches)
 
     start = time.time()
-    early_stopping = EarlyStopping(patience=5, delta=0.001)
+    early_stopping = EarlyStopping(patience=early_stop, delta=0.001)
 
     save_image(im,f"{path}/adv_img/{img_name}_step_{0}.png",normalized=True,processor=processor)
     evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{0}.txt",f"{path}/adv_img/{img_name}_step_{0}.png")
@@ -234,7 +234,8 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
             loss_hist_a.append(loss_a.item())
             loss_hist_e.append(loss_e.item())
             loss_hist_n.append(loss_n.item())
-            
+            loss_hist_p.append(loss_p.item())
+
             early_stopping(epoch_loss, image)
             if early_stopping.early_stop:
                 print("early_stopping")
@@ -254,6 +255,8 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                     loss_dict["entropy"]=loss_hist_e
                 if lambda_n !=0:
                     loss_dict["norm"]=loss_hist_n
+                if lambda_p !=0:
+                    loss_dict["p"]=loss_hist_p
                 
                 plot_losses(loss_dict,save_loss=True,path = f"{path}/hist/{img_name}")
                     
