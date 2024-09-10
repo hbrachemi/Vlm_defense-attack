@@ -238,7 +238,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                 save_image(im,f"{path}/adv_img/{img_name}_step_{0}.png",normalized=True,processor=processor)
                 evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}.txt",f"{path}/adv_img/{img_name}_step_{0}.png",kw_args)
 
-                loss_dict = {"overall":loss}
+                loss_dict = {"overall":loss_hist}
                 if lambda_a !=0:
                     loss_dict["att"]=loss_hist_a
                 if lambda_e !=0:
