@@ -214,8 +214,8 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                         loss_e += entropy_loss(layer_output_v)
                     if lambda_n !=0:
                         loss_n += layer_output_v[list_patches].norm(dim=1).mean()
-                    if lambda_p !=0:
-                        loss_p += (init_im - im).norm()
+            if lambda_p !=0:
+                loss_p += (init_im - im).norm()
                         
                     loss = lambda_a*loss_a + lambda_e*loss_e + lambda_n*loss_n + lambda_p*loss_p
 
