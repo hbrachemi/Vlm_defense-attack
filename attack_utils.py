@@ -112,7 +112,7 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                             for p in other_prompts:
                                 inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
                                 inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
-                                model_output = model.generate(**inputs_val,max_length=1000)
+                                model_output = model.generate(**inputs,max_length=1000)
                                 file.write(f"{processor.decode(model_output[0])}\n\n\n")
                                 file.flush()
         
