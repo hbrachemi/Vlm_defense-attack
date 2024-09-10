@@ -42,7 +42,7 @@ class CustomCEAttentionLoss(torch.nn.Module):
         attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
         attention_weights = torch.nn.functional.softmax(attention_scores, dim=-1)
         
-        y = torch.ones(attention_weights.size()).to(device)
+        y = torch.ones(attention_weights.size()).to(Q.device)
         y[:, self.target_token_indices] = 0 
         
         loss = torch.nn.CrossEntropyLoss()(attention_weights.flatten(),y.flatten())
