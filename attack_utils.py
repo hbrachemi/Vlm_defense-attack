@@ -33,7 +33,7 @@ class EarlyStopping:
             self.best_loss = loss
             self.best_image = image
         
-        elif loss > self.best_loss + self.delta:
+        elif loss >= self.best_loss + self.delta:
             self.counter += 1
             if self.counter >= self.patience:
                 self.early_stop = True
@@ -145,7 +145,7 @@ from losses import *
 from tqdm import tqdm
 import time
 
-def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,lambda_a=1,lambda_e=0,lambda_n=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test'):
+def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean'):
     
     list_patches = get_target_patches(image,boxes,w,h,patch_dim)
     means = processor.image_processor.image_mean
@@ -160,8 +160,13 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
     loss_hist_a = []
     loss_hist_e = []
     loss_hist_n = []
+    loss_hist_p = []
+
+    if att == 'mean':
+        att_loss = CustomAttentionLoss(target_token_indices=list_patches)
+    if att in ["ce","CE"]:
+        att_loss = CustomCEAttentionLoss(target_token_indices=list_patches)
     
-    att_loss = CustomAttentionLoss(target_token_indices=list_patches)
     entropy_loss = CustomEntropyLoss(target_token_indices=list_patches)
 
     start = time.time()
@@ -169,7 +174,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
 
     save_image(im,f"{path}/adv_img/{img_name}_step_{0}.png",normalized=True,processor=processor)
     evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{0}.txt",f"{path}/adv_img/{img_name}_step_{0}.png")
-
+    init_im = torch.clone(im)
 
     
     for step in tqdm(range(steps)):
@@ -185,6 +190,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
             loss_a = torch.zeros(1).to(model.device)
             loss_e = torch.zeros(1).to(model.device)
             loss_n = torch.zeros(1).to(model.device)
+            loss_p = torch.zeros(1).to(model.device)
         
             for l in range(len(target_layers_v)):
                     
@@ -208,7 +214,10 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                         loss_e += entropy_loss(layer_output_v)
                     if lambda_n !=0:
                         loss_n += layer_output_v[list_patches].norm(dim=1).mean()
-                    loss = lambda_a*loss_a + lambda_e*loss_e + lambda_n*loss_n
+                    if lambda_p !=0:
+                        loss_p += (init_im - im).norm()
+                        
+                    loss = lambda_a*loss_a + lambda_e*loss_e + lambda_n*loss_n + lambda_p*loss_p
 
             loss.backward(retain_graph=True)
             optimizer.step()
