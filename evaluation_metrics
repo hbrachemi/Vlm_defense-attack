@@ -1,0 +1,42 @@
+import torch
+from PIL import Image
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+from transformers import CLIPProcessor, CLIPModel
+model_clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+processor_clip = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32",map_device='auto')
+
+def compute_clip_score(img_path,txt,device=torch.device("cpu")):
+    im =Image.open(img_path)
+    
+    inputs = processor_clip(text=txt, images=im, return_tensors="pt", padding=True)
+    outputs = model_clip(**inputs)
+    
+    logits_per_image = outputs.logits_per_image 
+    clip_scores = logits_per_image.cpu().detach().numpy()
+    
+    return clip_scores 
+
+
+from skimage.metrics import structural_similarity as ssim
+import lpips
+import numpy as np
+
+lpips_metric = lpips.LPIPS(net='alex').to(device)
+
+def compute_perceptual_similarity(ref_image_path,image_path):
+    scores = {}
+    ref =Image.open(ref_image_path)
+    im =Image.open(image_path)
+
+    scores["ssim"], _ = ssim(np.array(ref.convert("L")), np.array(im.convert("L")), full=True)
+
+
+    ref_tensor = torch.tensor(np.array(ref.convert('RGB')).transpose(2, 0, 1)).unsqueeze(0)    
+    img_tensor = torch.tensor(np.array(im.convert('RGB')).transpose(2, 0, 1)).unsqueeze(0)
+
+    scores["lpips"] = lpips_metric(ref_tensor.float().to(device) / 255.0, img_tensor.float().to(device) / 255.0)
+    scores["lpips"] = scores["lpips"].cpu().detach().numpy()
+
+    return scores
