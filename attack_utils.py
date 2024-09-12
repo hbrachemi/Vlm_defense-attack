@@ -139,7 +139,24 @@ def plot_losses(losses,save_loss=True,path = None):
             plt.savefig(f"{path}_{loss_id}.png")
         plt.show()
 
+def check_model_recognition(model,processor,image,label):
+    
+    prompt = f"USER: <image> \nIs there any {label} apparent in the image?\nASSISTANT:"
+    inputs = processor(text = "USER: <image>\nASSISTANT:", images = image, return_tensors="pt").to(model.device)
+    model_output = model.generate(**inputs,max_length=1000)
+    model_output = processor.decode(model_output[0])
 
+    return "Yes" in model_output
+
+def check_attack_convergence(model,processor,image,label):
+    
+    prompt = f"USER: <image> \nIs there any {label} apparent in the image?\nASSISTANT:"
+    inputs = processor.tokenizer(text = "USER: <image>\nASSISTANT:",return_tensors="pt").to(model.device)
+    inputs["pixel_values"] = image
+    model_output = model.generate(**inputs,max_new_tokens =1)
+    model_output = processor.decode(model_output[0])
+
+    return "No" in model_output
 
 from losses import *
 from tqdm import tqdm
