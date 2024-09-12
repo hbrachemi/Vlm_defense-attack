@@ -151,7 +151,7 @@ def check_model_recognition(model,processor,image,label):
 def check_attack_convergence(model,processor,image,label):
     
     prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
-    inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
+    inputs = processor(text = prompt, images = torch.zeros((3,224,224)), return_tensors="pt").to(model.device)
     inputs["pixel_values"] = image
     model_output = model.generate(**inputs,max_new_tokens =1)
     model_output = processor.decode(model_output[0])
