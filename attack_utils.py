@@ -280,7 +280,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                     
                 start -= time.time()-end
             if (step+1) % check_convergence_rate == 0 :
-                if check_attack_convergence(model,processor,image,label):
+                if check_attack_convergence(model,processor,im,label):
                     break
             
     best_image = early_stopping.best_image
