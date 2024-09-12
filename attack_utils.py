@@ -141,28 +141,28 @@ def plot_losses(losses,save_loss=True,path = None):
 
 def check_model_recognition(model,processor,image,label):
     
-    prompt = f"USER: <image> \nIs there any {label} apparent in the image?\nASSISTANT:"
-    inputs = processor(text = "USER: <image>\nASSISTANT:", images = image, return_tensors="pt").to(model.device)
-    model_output = model.generate(**inputs,max_length=1000)
+    prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
+    inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
+    model_output = model.generate(**inputs,max_new_tokens=1)
     model_output = processor.decode(model_output[0])
 
     return "Yes" in model_output
 
 def check_attack_convergence(model,processor,image,label):
     
-    prompt = f"USER: <image> \nIs there any {label} apparent in the image?\nASSISTANT:"
-    inputs = processor.tokenizer(text = "USER: <image>\nASSISTANT:",return_tensors="pt").to(model.device)
+    prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
+    inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
     inputs["pixel_values"] = image
     model_output = model.generate(**inputs,max_new_tokens =1)
     model_output = processor.decode(model_output[0])
 
     return "No" in model_output
-
+    
 from losses import *
 from tqdm import tqdm
 import time
 
-def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5):
+def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5,check_convergence_rate=100):
     
     list_patches = get_target_patches(image,boxes,w,h,patch_dim)
     means = processor.image_processor.image_mean
@@ -279,7 +279,10 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                 plot_losses(loss_dict,save_loss=True,path = f"{path}/hist/{img_name}")
                     
                 start -= time.time()-end
-    
+            if (step+1) % check_convergence_rate == 0 :
+                if check_attack_convergence(model,processor,image,label):
+                    break
+            
     best_image = early_stopping.best_image
     end = time.time()
     kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
