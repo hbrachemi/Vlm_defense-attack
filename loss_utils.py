@@ -1,3 +1,5 @@
+import torch
+
 def self_attention_MH(layer_output_q, layer_output_k, layer_output_v, num_heads=16, dropout_rate=0):
     """Using multi-head official implementation"""
     # Determine batch size, sequence length, and embed_dim from the layer_output_q shape
