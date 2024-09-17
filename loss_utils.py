@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from model_utils import encoder_QKV
 
 def self_attention_MH(layer_output_q, layer_output_k, layer_output_v, num_heads=16, dropout_rate=0):
     """Using multi-head official implementation"""
