@@ -117,7 +117,7 @@ def extract_target_hidden_states(model,inputs,im,vlm,tokens,target_layer,num_hea
                 
     
     #Compute first attention matrix
-    _, attention_weights = self_attention_MH(layer_output_q, layer_output_k, layer_output_v)
+    _, attention_weights = self_attention_MH(layer_output_q, layer_output_k, None)
 
     #Redistribute attention
     A = redistribute_probabilities(attention_weights, tokens)
@@ -133,33 +133,34 @@ def extract_target_hidden_states(model,inputs,im,vlm,tokens,target_layer,num_hea
     proj_result = proj_result.view(batch_size, num_heads, seq_len, head_dim)
     proj_result = proj_result.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
 
-    
 
     def create_replace_input_hook(new_input):
         def replace_input_hook(module, input):
             return new_input
         return replace_input_hook
     
-    layer_1 = proj[0]
-    hook_handle = layer_1.register_forward_pre_hook(create_replace_input_hook(proj_result))
+    hook_handle = proj[0].register_forward_pre_hook(create_replace_input_hook(proj_result))
 
     
     activations_target = {}
     
     def get_activation(name):
                 def hook_fn(module, input, output):
-                    activations_target[name]=output
+                    activations_target[name]=output.detach()
                 return hook_fn
         
     hook_handle_v = V[target_layer].register_forward_hook(get_activation('V'))
     hook_handle_k = K[target_layer].register_forward_hook(get_activation('K'))
     hook_handle_q = Q[target_layer].register_forward_hook(get_activation('Q'))
     hook_handle_proj = proj[target_layer].register_forward_hook(get_activation('proj'))
+    
     model_output = model(**inputs,pixel_values=im)
+    
+    hook_handle.remove()
     hook_handle_v.remove()                
     hook_handle_k.remove()                
     hook_handle_q.remove()   
-    hook_handle.remove()
+    hook_handle_proj.remove()
 
     return activations_target
    
