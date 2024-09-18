@@ -63,7 +63,7 @@ def get_target_patches(image,boxes,w,h,patch_dim):
         c_grid = index % (h//patch_dim)
         for box in boxes:
             if l_grid*patch_dim >= box[1] and l_grid*patch_dim < box[3] and c_grid*patch_dim >= box[0] and c_grid < box[2]:
-                list_patches.append(index)
+                list_patches.append(index+1)
     return list_patches
 
 
@@ -162,7 +162,7 @@ from losses import *
 from tqdm import tqdm
 import time
 
-def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5,check_convergence_rate=100):
+def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,target_layers_proj,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,lambda_pre_proj=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5,check_convergence_rate=100):
     
     list_patches = get_target_patches(image,boxes,w,h,patch_dim)
     means = processor.image_processor.image_mean
@@ -178,11 +178,12 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
     loss_hist_e = []
     loss_hist_n = []
     loss_hist_p = []
-
+    loss_hist_proj = []
+    
     if att == 'mean':
-        att_loss = CustomAttentionLoss(target_token_indices=list_patches)
+        att_loss = CustomMHAttentionLoss(target_token_indices=list_patches)
     if att in ["ce","CE"]:
-        att_loss = CustomCEAttentionLoss(target_token_indices=list_patches)
+        att_loss = CustomMHCEAttentionLoss(target_token_indices=list_patches)
     
     entropy_loss = CustomEntropyLoss(target_token_indices=list_patches)
 
@@ -203,39 +204,50 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                 def hook_fn(module, input, output):
                     activations[name]=output
                 return hook_fn
-          
+            def get_input(name):
+                def hook_fn(module, input, output):
+                    activations[name]=input
+                return hook_fn
             loss_a = torch.zeros(1).to(model.device)
             loss_e = torch.zeros(1).to(model.device)
             loss_n = torch.zeros(1).to(model.device)
             loss_p = torch.zeros(1).to(model.device)
+            loss_proj = torch.zeros(1).to(model.device)
+
+
         
             for l in range(len(target_layers_v)):
                     
                     hook_handle_v = target_layers_v[l].register_forward_hook(get_activation('V'))
                     hook_handle_k = target_layers_k[l].register_forward_hook(get_activation('K'))
                     hook_handle_q = target_layers_q[l].register_forward_hook(get_activation('Q'))
-                    
+                    hook_handle_proj = target_layers_proj[l].register_forward_hook(get_input('proj'))
+
                     model_output = model(**inputs,pixel_values=im)
                     
-                    layer_output_v = activations['V'][0]
-                    layer_output_k = activations['K'][0]
-                    layer_output_q = activations['Q'][0]
-                
+                    layer_output_v = activations['V']
+                    layer_output_k = activations['K']
+                    layer_output_q = activations['Q']
+                    layer_input_proj = activations['proj'][0]
+
                     hook_handle_v.remove()                
                     hook_handle_k.remove()                
                     hook_handle_q.remove()                
-            
+                    hook_handle_proj.remove()   
+                
                     if lambda_a!=0:
-                        loss_a += att_loss(layer_output_q, layer_output_k)
+                        loss_a += att_loss(layer_output_q, layer_output_k,16)
                     if lambda_e !=0:
                         loss_e += entropy_loss(layer_output_v)
                     if lambda_n !=0:
                         loss_n += layer_output_v[list_patches].norm(dim=1).mean()
+                    if lambda_pre_proj!=0:
+                        loss_proj += layer_input_proj[0][list_patches].norm(dim=1).mean()
                         
             if lambda_p !=0:
                 loss_p += (init_im - im).norm()
                         
-            loss = lambda_a*loss_a + lambda_e*loss_e + lambda_n*loss_n + lambda_p*loss_p
+            loss = lambda_a*loss_a + lambda_e*loss_e + lambda_n*loss_n + lambda_p*loss_p + lambda_pre_proj*loss_proj
 
             loss.backward(retain_graph=True)
             optimizer.step()
@@ -253,6 +265,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
             loss_hist_e.append(loss_e.item())
             loss_hist_n.append(loss_n.item())
             loss_hist_p.append(loss_p.item())
+            loss_hist_proj.append(loss_proj.item())
 
             early_stopping(epoch_loss, image)
             if early_stopping.early_stop:
@@ -275,6 +288,8 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                     loss_dict["norm"]=loss_hist_n
                 if lambda_p !=0:
                     loss_dict["p"]=loss_hist_p
+                if lambda_pre_proj !=0:
+                    loss_dict["proj"]=loss_hist_proj
                 
                 plot_losses(loss_dict,save_loss=True,path = f"{path}/hist/{img_name}")
                     

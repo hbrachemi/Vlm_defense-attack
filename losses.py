@@ -1,4 +1,6 @@
 import torch
+import torch.nn.functional as F
+from loss_utils import *
 
 class CustomAttentionLoss(torch.nn.Module):
     def __init__(self, target_token_indices):
@@ -16,6 +18,25 @@ class CustomAttentionLoss(torch.nn.Module):
 
         return loss
 
+class CustomMHAttentionLoss(torch.nn.Module):
+    def __init__(self, target_token_indices):
+        super(CustomMHAttentionLoss, self).__init__()
+        self.target_token_indices = target_token_indices  
+
+    def forward(self, Q, K, num_heads=16):
+        
+        batch_size, seq_len, embed_dim = Q.size()
+        head_dim = embed_dim // num_heads
+        
+        if embed_dim % num_heads != 0:
+            raise ValueError("Embedding dimension must be divisible by the number of heads.")
+    
+        _, attention_weights = self_attention_MH(Q,K,None,num_heads)
+
+        target_attention_weights = attention_weights[:,:, self.target_token_indices]  
+        loss = target_attention_weights.mean()  
+
+        return loss
 
 class CustomEntropyLoss(torch.nn.Module):
     def __init__(self, target_token_indices):
@@ -50,16 +71,22 @@ class CustomCEAttentionLoss(torch.nn.Module):
 
         return loss
 
-class CustomPreSoftmaxAttentionLoss(torch.nn.Module):
+class CustomMHCEAttentionLoss(torch.nn.Module):
     def __init__(self, target_token_indices):
-        super(CustomPreSoftmaxAttentionLoss, self).__init__()
+        super(CustomMHCEAttentionLoss, self).__init__()
         self.target_token_indices = target_token_indices  
 
-    def forward(self, Q, K):
-        d_k = Q.size(-1)  
-        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+    def forward(self, Q, K, num_heads=16):
+        batch_size, seq_len, embed_dim = Q.size()
+        head_dim = embed_dim // num_heads
+        if embed_dim % num_heads != 0:
+            raise ValueError("Embedding dimension must be divisible by the number of heads.")
+        _, attention_weights = self_attention_MH(Q,K,None,num_heads)
+
+        y = torch.ones(attention_weights.size()).to(Q.device)
+        y[:,:,self.target_token_indices] = 0 
         
-        target_attention_weights = attention_scores[:, self.target_token_indices]  
-        loss = target_attention_weights.mean()  
+        loss = torch.nn.CrossEntropyLoss()(attention_weights.flatten(),y.flatten())
+        
 
         return loss
