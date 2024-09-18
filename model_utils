@@ -1,5 +1,9 @@
 from transformers import AutoProcessor, LlavaForConditionalGeneration, InstructBlipProcessor, InstructBlipForConditionalGeneration #LlavaNextProcessor, LlavaNextForConditionalGeneration
 
+import copy 
+
+
+
 def vlm_pretrained(vlm:str):
     match vlm:
         case "instruct_blip":
@@ -14,7 +18,6 @@ def vlm_pretrained(vlm:str):
         
     model = model.eval()
     return model,processor
-
 
 def encoder_QKV(vlm:str,model):
     
@@ -32,7 +35,8 @@ def encoder_QKV(vlm:str,model):
             encoder_K = [encoder_leaf_nodes[3+i*9] for i in range(24)]
             encoder_V = [encoder_leaf_nodes[4+i*9] for i in range(24)] 
             encoder_Q = [encoder_leaf_nodes[5+i*9] for i in range(24)]
-            encoder_layer_norm = [encoder_leaf_nodes[7+i*9] for i in range(24)]
+            encoder_proj = [encoder_leaf_nodes[6+i*9] for i in range(24)]
+            #encoder_layer_norm = [encoder_leaf_nodes[7+i*9] for i in range(24)]
         
         case _:
             raise Exception("Sorry the provided vlm is not within this list, try extracting the QKV layers manually")
@@ -41,4 +45,25 @@ def encoder_QKV(vlm:str,model):
     encoder_QKV_dict['K'] = encoder_K
     encoder_QKV_dict['Q'] = encoder_Q
     encoder_QKV_dict['V'] = encoder_V
+    encoder_QKV_dict['proj'] = encoder_proj
+    
     return encoder_QKV_dict
+
+
+
+
+def bounding_box_new_position(image,bbox,new_width,new_height):
+            original_width, original_height = image.size
+            bbox = copy.deepcopy(bbox)
+            for idx,box in enumerate(bbox):
+                x_min, y_min, x_max, y_max = box
+
+                width_scale = new_width / original_width
+                height_scale = new_height / original_height
+
+                x_min_resized = x_min * width_scale
+                y_min_resized = y_min * height_scale
+                x_max_resized = x_max * width_scale
+                y_max_resized = y_max * height_scale
+                bbox[idx] = [x_min_resized, y_min_resized, x_max_resized, y_max_resized]
+            return bbox
