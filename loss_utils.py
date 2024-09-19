@@ -59,7 +59,7 @@ def self_attention_MH(layer_output_q, layer_output_k, layer_output_v,layer_qkv =
         attention_weights = F.dropout(attention_weights, p=dropout_rate, training=True)
         proj_result = torch.matmul(attention_weights, value).permute(0, 2, 1, 3)
         new_proj_result_shape = proj_result.size()[:-2] + (embed_dim,)
-        proj_result = proj_result.view(new_proj_result_shape)
+        proj_result = proj_result.contiguous().view(new_proj_result_shape)
     
     
     return proj_result, attention_weights
