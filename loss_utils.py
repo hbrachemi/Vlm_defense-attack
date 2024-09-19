@@ -2,7 +2,15 @@ import torch
 import torch.nn.functional as F
 from model_utils import encoder_QKV
 
+def extract_q_k_v_from_qkv(layer_qkv_output,num_heads = 16):
+    batch_size, seq_len, concat_embed_dim = layer_qkv_output.size()
+    embed_dim = concat_embed_dim //3
+    head_dim = embed_dim // num_heads
+    layer_qkv_output = layer_qkv_output.view(batch_size, seq_len, 3, num_heads, embed_dim // num_heads).permute(2, 0, 3, 1, 4)
+    query, key, value = layer_qkv_output[0], layer_qkv_output[1], layer_qkv_output[2]
+    return query, key, value
 
+    
 def self_attention_MH(layer_output_q, layer_output_k, layer_output_v,layer_qkv = None, num_heads=16, dropout_rate=0):
     """Using multi-head official implementation"""
     if layer_output_q is not None and layer_output_k is not None:
