@@ -28,7 +28,7 @@ def self_attention_MH(layer_output_q, layer_output_k, layer_output_v,layer_qkv =
         batch_size, seq_len, concat_embed_dim = layer_qkv.size()
         embed_dim = concat_embed_dim //3
         head_dim = embed_dim // num_heads
-        layer_qkv = layer_qkv.reshape(batch_size, seq_len, 3, num_heads, embed_dim // num_heads).permute(2, 0, 3, 1, 4)
+        layer_qkv = layer_qkv.view(batch_size, seq_len, 3, num_heads, embed_dim // num_heads).permute(2, 0, 3, 1, 4)
         query, key, value = layer_qkv[0], layer_qkv[1], layer_qkv[2]
 
     
@@ -38,18 +38,19 @@ def self_attention_MH(layer_output_q, layer_output_k, layer_output_v,layer_qkv =
     # Compute attention scores: (batch_size * num_heads, seq_len, seq_len)
     if layer_output_q is not None and layer_output_k is not None:
         attention_scores = torch.bmm(query, key.transpose(1, 2)) * scale
+        
         # Apply softmax to get attention weights
         attention_weights = F.softmax(attention_scores, dim=-1)
         # Apply dropout (if applicable)
         attention_weights = F.dropout(attention_weights, p=dropout_rate, training=True)
-        if value is None:
-            return None, attention_weights
+        if layer_output_v is None:
+            return None, attention_weights.view(batch_size,num_heads,seq_len,seq_len)
         # Compute the attention output: (batch_size * num_heads, seq_len, head_dim)
         proj_result = torch.bmm(attention_weights, value)
         # Reshape the output back to (batch_size, seq_len, embed_dim)
         proj_result = proj_result.view(batch_size, num_heads, seq_len, head_dim)
         proj_result = proj_result.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
-    
+        attention_weights = attention_weights.view(batch_size,num_heads,seq_len,seq_len)
     if layer_qkv is not None:
         attention_scores = torch.matmul(query, key.transpose(-1, -2)) * scale
         # Apply softmax to get attention weights
@@ -58,7 +59,7 @@ def self_attention_MH(layer_output_q, layer_output_k, layer_output_v,layer_qkv =
         attention_weights = F.dropout(attention_weights, p=dropout_rate, training=True)
         proj_result = torch.matmul(attention_weights, value).permute(0, 2, 1, 3)
         new_proj_result_shape = proj_result.size()[:-2] + (embed_dim,)
-        proj_result = proj_result.reshape(new_proj_result_shape)
+        proj_result = proj_result.view(new_proj_result_shape)
     
     
     return proj_result, attention_weights
