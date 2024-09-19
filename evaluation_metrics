@@ -3,22 +3,6 @@ from PIL import Image
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-from transformers import CLIPProcessor, CLIPModel
-model_clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-processor_clip = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32",map_device='auto')
-
-def compute_clip_score(img_path,txt,device=torch.device("cpu")):
-    im =Image.open(img_path)
-    
-    inputs = processor_clip(text=txt, images=im, return_tensors="pt", padding=True)
-    outputs = model_clip(**inputs)
-    
-    logits_per_image = outputs.logits_per_image 
-    clip_scores = logits_per_image.cpu().detach().numpy()
-    
-    return clip_scores 
-
-
 from skimage.metrics import structural_similarity as ssim
 import lpips
 import numpy as np
@@ -40,3 +24,20 @@ def compute_perceptual_similarity(ref_image_path,image_path):
     scores["lpips"] = scores["lpips"].cpu().detach().numpy()
 
     return scores
+
+
+import pickle 
+with open('ImageNetLabels.pkl', 'rb') as file: 
+	GT_data = pickle.load(file) 
+
+
+def evaluate_image_context(model,processor,label,path_img):
+    
+    image = Image.open(f"{path_img}")
+    
+    prompt = f"USER: <image> \nHow would you describe the image without the {label}?\nASSISTANT:"
+    inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
+    inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
+        
+    model_output = model.generate(**inputs,max_length=1000,output_scores= True,return_dict_in_generate=True)
+    return processor.decode(model_output.sequences[0])
