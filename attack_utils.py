@@ -176,14 +176,24 @@ from losses import *
 from tqdm import tqdm
 import time
 
-def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_layers_q,target_layers_k,target_layers_v,target_layers_proj,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,lambda_pre_proj=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5,check_convergence_rate=100):
+def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_layers,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,lambda_pre_proj=0,w=336,h=336,patch_dim=14,steps=1000,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5,check_convergence_rate=100,vlm='Llava-7b'):
+    
+    if not target_layers["qkv_state"]: #In some architectures qkv are projected using separated layers such as Llava
+        target_layers_q = target_layers["q"]
+        target_layers_k = target_layers["k"]
+        target_layers_v = target_layers["v"]
+        target_layers_proj = target_layers["proj"]  
+    
+    if target_layers["qkv_state"]: #In some architectures such as Insctruct-Blip qkv projections are done using one projection layer, the projections are thus concatenated and needs to be separated for future use
+        target_layers_qkv = target_layers["qkv"]
+        target_layers_proj = target_layers["proj"]
+        
+
     
     list_patches = get_target_patches(image,boxes,w,h,patch_dim)
     means = processor.image_processor.image_mean
     stds = processor.image_processor.image_std
-    
-    if len(list_patches) == 0:
-        return image, 0
+
 
     inputs = processor(text = "USER: <image>\nASSISTANT:", images = image, return_tensors="pt").to(model.device)
     im = torch.nn.Parameter(inputs.pop('pixel_values').to(model.device), requires_grad=True)
@@ -197,9 +207,9 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
     loss_hist_proj = []
     
     if att == 'mean':
-        att_loss = CustomMHAttentionLoss(target_token_indices=list_patches)
+        att_loss = CustomMHAttentionLoss(list_patches,target_layers["qkv_state"])
     if att in ["ce","CE"]:
-        att_loss = CustomMHCEAttentionLoss(target_token_indices=list_patches)
+        att_loss = CustomMHCEAttentionLoss(list_patches,target_layers["qkv_state"])
     
     entropy_loss = CustomEntropyLoss(target_token_indices=list_patches)
 
@@ -232,33 +242,57 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
 
 
         
-            for l in range(len(target_layers_v)):
-                    
-                    hook_handle_v = target_layers_v[l].register_forward_hook(get_activation('V'))
-                    hook_handle_k = target_layers_k[l].register_forward_hook(get_activation('K'))
-                    hook_handle_q = target_layers_q[l].register_forward_hook(get_activation('Q'))
-                    hook_handle_proj = target_layers_proj[l].register_forward_hook(get_input('proj'))
+            for l in range(len(target_layers_proj)):
+                    if not target_layers["qkv_state"]:
+                        hook_handle_v = target_layers_v[l].register_forward_hook(get_activation('V'))
+                        hook_handle_k = target_layers_k[l].register_forward_hook(get_activation('K'))
+                        hook_handle_q = target_layers_q[l].register_forward_hook(get_activation('Q'))
+                        hook_handle_proj = target_layers_proj[l].register_forward_hook(get_input('proj'))
 
-                    model_output = model(**inputs,pixel_values=im)
+                        model_output = model(**inputs,pixel_values=im)
                     
-                    layer_output_v = activations['V']
-                    layer_output_k = activations['K']
-                    layer_output_q = activations['Q']
-                    layer_input_proj = activations['proj'][0]
+                        layer_output_v = activations['V']
+                        layer_output_k = activations['K']
+                        layer_output_q = activations['Q']
+                        layer_proj = activations['proj'][0]
 
-                    hook_handle_v.remove()                
-                    hook_handle_k.remove()                
-                    hook_handle_q.remove()                
-                    hook_handle_proj.remove()   
+                        hook_handle_v.remove()                
+                        hook_handle_k.remove()                
+                        hook_handle_q.remove()                
+                        hook_handle_proj.remove()   
                 
-                    if lambda_a!=0:
-                        loss_a += att_loss(layer_output_q, layer_output_k,16)
-                    if lambda_e !=0:
-                        loss_e += entropy_loss(layer_output_v)
-                    if lambda_n !=0:
-                        loss_n += layer_output_v[list_patches].norm(dim=1).mean()
-                    if lambda_pre_proj!=0:
-                        loss_proj += layer_input_proj[0][list_patches].norm(dim=1).mean()
+                        if lambda_a!=0:
+                            loss_a += att_loss(layer_output_q, layer_output_k)
+                        if lambda_e !=0:
+                            loss_e += entropy_loss(layer_output_v)
+                        if lambda_n !=0:
+                            loss_n += layer_output_v[list_patches].norm(dim=1).mean()
+                        if lambda_pre_proj!=0:
+                            loss_proj += layer_proj[0][list_patches].norm(dim=1).mean()
+                        
+                        
+                    if target_layers["qkv_state"]:
+                        hook_handle_qkv = target_layers_qkv[l].register_forward_hook(get_activation('qkv'))
+                        hook_handle_proj = target_layers_proj[l].register_forward_hook(get_input('proj'))
+                        
+                        model_output = model(**inputs,pixel_values=im)
+
+                        layer_output_qkv = activations['qkv']
+                        layer_proj = activations['proj'][0]
+                        _ , _ , value = extract_q_k_v_from_qkv(layer_output_qkv)
+                        
+                        hook_handle_qkv.remove()   
+                        hook_handle_proj.remove() 
+
+                        if lambda_a!=0:
+                            loss_a += att_loss(None, None,layer_output_qkv)
+                        if lambda_e !=0:
+                            loss_e += entropy_loss(value)
+                        if lambda_n !=0:
+                            loss_n += value[:,:,list_patches,:].norm()
+                        if lambda_pre_proj!=0:
+                            loss_proj += layer_proj[0][list_patches].norm(dim=1).mean()
+                
                         
             if lambda_p !=0:
                 loss_p += (init_im - im).norm()
@@ -293,6 +327,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
 
                 kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
                 save_image(im,f"{path}/adv_img/{img_name}_step_{step+1}.png",normalized=True,processor=processor)
+                
                 evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}.txt",f"{path}/adv_img/{img_name}_step_{step+1}.png",kw_args)
 
                 loss_dict = {"overall":loss_hist}
@@ -311,7 +346,7 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
                     
                 start -= time.time()-end
             if (step+1) % check_convergence_rate == 0 :
-                if check_attack_convergence(model,processor,im,label):
+                if check_attack_convergence(model,processor,im,label,vlm):
                     break
             
     best_image = early_stopping.best_image
