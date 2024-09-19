@@ -36,18 +36,33 @@ def encoder_QKV(vlm:str,model):
             encoder_V = [encoder_leaf_nodes[4+i*9] for i in range(24)] 
             encoder_Q = [encoder_leaf_nodes[5+i*9] for i in range(24)]
             encoder_proj = [encoder_leaf_nodes[6+i*9] for i in range(24)]
-            #encoder_layer_norm = [encoder_leaf_nodes[7+i*9] for i in range(24)]
-        
+            
+            encoder_QKV_dict['K'] = encoder_K
+            encoder_QKV_dict['Q'] = encoder_Q
+            encoder_QKV_dict['V'] = encoder_V
+            encoder_QKV_dict['proj'] = encoder_proj
+    
+        case "instruct_blip":
+            encoder = model.get_submodule("vision_model").get_submodule("encoder")
+            decoder = model.get_submodule("language_model")
+
+            encoder_leaf_nodes = [module for module in encoder.modules()
+                  if len(list(module.children())) == 0]
+            decoder_leaf_nodes = [module for module in decoder.modules()
+                  if len(list(module.children())) == 0]
+            
+            encoder_qkv = [encoder_leaf_nodes[1+i*8] for i in range(39)]
+            encoder_proj = [encoder_leaf_nodes[2+i*8] for i in range(39)]
+            encoder_QKV_dict['qkv'] = encoder_qkv
+            encoder_QKV_dict['proj'] = encoder_proj
+   
         case _:
             raise Exception("Sorry the provided vlm is not within this list, try extracting the QKV layers manually")
             
 
-    encoder_QKV_dict['K'] = encoder_K
-    encoder_QKV_dict['Q'] = encoder_Q
-    encoder_QKV_dict['V'] = encoder_V
-    encoder_QKV_dict['proj'] = encoder_proj
     
     return encoder_QKV_dict
+
 
 
 
