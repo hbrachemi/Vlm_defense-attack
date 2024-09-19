@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from loss_utils import *
 
 
+
 class CustomMHAttentionLoss(torch.nn.Module):
     def __init__(self, target_token_indices,qkv_state=False):
         super(CustomMHAttentionLoss, self).__init__()
@@ -27,11 +28,13 @@ class CustomMHAttentionLoss(torch.nn.Module):
             
             if embed_dim % num_heads != 0:
                 raise ValueError("Embedding dimension must be divisible by the number of heads.")
-    
+            
             _, attention_weights = self_attention_MH(None,None,None,QKV)
-
+        target_attention_weights = attention_weights[:,:,:, self.target_token_indices]  
         
-        target_attention_weights = attention_weights[:,:, self.target_token_indices]  
+        if target_attention_weights.shape[-1]!= len(self.target_token_indices):
+                raise ValueError("Q,K or QKV must be of shape Batch_size x num_heads x len_seq x len_seq")
+
         loss = target_attention_weights.mean()  
 
         return loss
@@ -66,8 +69,8 @@ class CustomMHCEAttentionLoss(torch.nn.Module):
 
 
         y = torch.ones(attention_weights.size()).to(device)
-        y[:,:,self.target_token_indices] = 0 
-        
+        y[:,:,:,self.target_token_indices] = 0 
+
         loss = torch.nn.CrossEntropyLoss()(attention_weights.flatten(),y.flatten())
         
 
