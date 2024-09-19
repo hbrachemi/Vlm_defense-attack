@@ -10,6 +10,8 @@ caption_prompts = [
     "USER: <image> Offer a short description of the subjects present in this image. ASSISTANT:",
 ]
 
+
+
 possible_prompts = classif_prompts+caption_prompts
 
 import pickle 
@@ -73,7 +75,7 @@ def get_word_index(processor,word):
 
 from PIL import ImageDraw,Image
 
-def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompts=None):
+def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompts=None,vlm='Llava'):
     
     image = Image.open(f"{path_img}")
     
@@ -87,6 +89,9 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                                 file.flush()
                         
                         prompt = f"USER: <image> \nIs there any {label} apparent in the image?\nASSISTANT:"
+                        if vlm == 'instruct_blip':
+                            prompt = prompt.replace('USER: <image> ','').replace(' ASSISTANT:','').replace("\n","")
+                        
                         inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
                         inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
         
@@ -99,8 +104,10 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                         file.write(f"proba of saying yes: {yes_proba}\nproba of saying no: {no_proba} \n\n")
                         file.flush()
 
-
                         prompt = f"USER: <image>.\nASSISTANT:"
+                        if vlm == 'instruct_blip':
+                            prompt = prompt.replace('USER: <image> ','').replace(' ASSISTANT:','').replace("\n","")
+
                         inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
                         inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
         
@@ -110,6 +117,8 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
 
                         if other_prompts is not None:
                             for p in other_prompts:
+                                if vlm == 'instruct_blip':
+                                    p = p.replace('USER: <image> ','').replace(' ASSISTANT:','').replace("\n","")
                                 inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
                                 inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
                                 model_output = model.generate(**inputs,max_length=1000)
@@ -139,18 +148,23 @@ def plot_losses(losses,save_loss=True,path = None):
             plt.savefig(f"{path}_{loss_id}.png")
         plt.show()
 
-def check_model_recognition(model,processor,image,label):
-    
-    prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
+def check_model_recognition(model,processor,image,label,vlm):
+    if vlm == 'instruct_blip':
+        prompt = f"Is there any {GT_data[label[0]]} apparent in the image?"
+    else:
+        prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
     inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
     model_output = model.generate(**inputs,max_new_tokens=1)
     model_output = processor.decode(model_output[0])
 
     return "Yes" in model_output
 
-def check_attack_convergence(model,processor,image,label):
+def check_attack_convergence(model,processor,image,label,vlm):
     
-    prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
+    if vlm == 'instruct_blip':
+        prompt = f"Is there any {GT_data[label[0]]} apparent in the image?"
+    else:
+        prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
     inputs = processor(text = prompt, images = torch.zeros((3,224,224)), return_tensors="pt").to(model.device)
     inputs["pixel_values"] = image
     model_output = model.generate(**inputs,max_new_tokens =1)
@@ -167,7 +181,9 @@ def generate_adv_image(image,label,boxes,model,processor,optimizer,lr,target_lay
     list_patches = get_target_patches(image,boxes,w,h,patch_dim)
     means = processor.image_processor.image_mean
     stds = processor.image_processor.image_std
-
+    
+    if len(list_patches) == 0:
+        return image, 0
 
     inputs = processor(text = "USER: <image>\nASSISTANT:", images = image, return_tensors="pt").to(model.device)
     im = torch.nn.Parameter(inputs.pop('pixel_values').to(model.device), requires_grad=True)
