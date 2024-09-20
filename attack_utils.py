@@ -64,7 +64,7 @@ def get_target_patches(image,boxes,w,h,patch_dim):
         l_grid =  index // (w//patch_dim)
         c_grid = index % (h//patch_dim)
         for box in boxes:
-            if l_grid*patch_dim >= box[1] and l_grid*patch_dim <= box[3] and c_grid*patch_dim >= box[0] and c_grid <= box[2]:
+            if l_grid*patch_dim >= box[1] and l_grid*patch_dim < box[3] and c_grid*patch_dim >= box[0] and c_grid < box[2]:
                 list_patches.append(index+1)
     return list_patches
 
@@ -100,7 +100,9 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                         file.flush()
                         proba_scores = torch.nn.functional.softmax(model_output[1][0][0],dim=-1)
                         yes_proba = proba_scores[get_word_index(processor,"Yes")]
-                        no_proba = proba_scores[get_word_index(processor,"No")]
+                        yes_proba += proba_scores[get_word_index(processor,"yes")]
+                        no_proba = proba_scores[get_word_index(processor,"no")]
+                        no_proba += proba_scores[get_word_index(processor,"No")]
                         file.write(f"proba of saying yes: {yes_proba}\nproba of saying no: {no_proba} \n\n")
                         file.flush()
 
