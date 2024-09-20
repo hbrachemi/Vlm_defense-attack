@@ -64,7 +64,7 @@ def get_target_patches(image,boxes,w,h,patch_dim):
         l_grid =  index // (w//patch_dim)
         c_grid = index % (h//patch_dim)
         for box in boxes:
-            if l_grid*patch_dim >= box[1] and l_grid*patch_dim < box[3] and c_grid*patch_dim >= box[0] and c_grid < box[2]:
+            if l_grid*patch_dim >= box[1] and l_grid*patch_dim <= box[3] and c_grid*patch_dim >= box[0] and c_grid <= box[2]:
                 list_patches.append(index+1)
     return list_patches
 
@@ -90,7 +90,7 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                         
                         prompt = f"USER: <image> \nIs there any {label} apparent in the image?\nASSISTANT:"
                         if vlm == 'instruct_blip':
-                            prompt = prompt.replace('USER: <image> ','').replace(' ASSISTANT:','').replace("\n","")
+                            prompt = prompt.replace('USER: <image> ','').replace('ASSISTANT:','')
                         
                         inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
                         inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
@@ -106,7 +106,7 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
 
                         prompt = f"USER: <image>.\nASSISTANT:"
                         if vlm == 'instruct_blip':
-                            prompt = prompt.replace('USER: <image> ','').replace(' ASSISTANT:','').replace("\n","")
+                            prompt = prompt.replace('USER: <image> ','').replace('ASSISTANT:','').replace("\n","")
 
                         inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
                         inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
@@ -118,7 +118,7 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                         if other_prompts is not None:
                             for p in other_prompts:
                                 if vlm == 'instruct_blip':
-                                    p = p.replace('USER: <image> ','').replace(' ASSISTANT:','').replace("\n","")
+                                    p = p.replace('USER: <image> ','').replace('ASSISTANT:','').replace("\n","")
                                 inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
                                 inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
                                 model_output = model.generate(**inputs,max_length=1000)
@@ -162,7 +162,7 @@ def check_model_recognition(model,processor,image,label,vlm):
 def check_attack_convergence(model,processor,image,label,vlm):
     
     if vlm == 'instruct_blip':
-        prompt = f"Is there any {GT_data[label[0]]} apparent in the image?"
+        prompt = f"Is there any {GT_data[label[0]]} apparent in the image?\n"
     else:
         prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
     inputs = processor(text = prompt, images = torch.zeros((3,224,224)), return_tensors="pt").to(model.device)
@@ -170,7 +170,7 @@ def check_attack_convergence(model,processor,image,label,vlm):
     model_output = model.generate(**inputs,max_new_tokens =1)
     model_output = processor.decode(model_output[0])
 
-    return "No" in model_output
+    return "No" in model_output or "no" in model_output
     
 from losses import *
 from tqdm import tqdm
@@ -217,7 +217,7 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_la
     early_stopping = EarlyStopping(patience=early_stop, delta=0.001)
 
     save_image(im,f"{path}/adv_img/{img_name}_step_{0}.png",normalized=True,processor=processor)
-    evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{0}.txt",f"{path}/adv_img/{img_name}_step_{0}.png")
+    evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{0}.txt",f"{path}/adv_img/{img_name}_step_{0}.png",vlm=vlm)
     init_im = torch.clone(im)
 
     
@@ -328,7 +328,7 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_la
                 kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
                 save_image(im,f"{path}/adv_img/{img_name}_step_{step+1}.png",normalized=True,processor=processor)
                 
-                evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}.txt",f"{path}/adv_img/{img_name}_step_{step+1}.png",kw_args)
+                evaluate_image(model,processor,GT_data[label[0]],f"{path}/predictions/{img_name}_step_{step+1}.txt",f"{path}/adv_img/{img_name}_step_{step+1}.png",kw_args,vlm=vlm)
 
                 loss_dict = {"overall":loss_hist}
                 if lambda_a !=0:
@@ -353,5 +353,5 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_la
     end = time.time()
     kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
     save_image(im,f"{path}/best/{img_name}_best.png",normalized=True,processor=processor)
-    evaluate_image(model,processor,GT_data[label[0]],f"{path}/best/{img_name}_best.txt",f"{path}/best/{img_name}_best.png",kw_args,possible_prompts)
-    return best_image, end-start
+    evaluate_image(model,processor,GT_data[label[0]],f"{path}/best/{img_name}_best.txt",f"{path}/best/{img_name}_best.png",kw_args,possible_prompts,vlm=vlm)
+    return best_image, end-start, im
