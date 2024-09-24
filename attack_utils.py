@@ -70,7 +70,7 @@ def get_target_patches(image,boxes,w,h,patch_dim):
 
 
 def get_word_index(processor,word):
-    return processor.tokenizer.vocab[f"▁{word}"]
+    return processor.tokenizer.vocab[f"{word}"]
 
 
 from PIL import ImageDraw,Image
@@ -98,11 +98,17 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                         model_output = model.generate(**inputs,max_length=1000,output_scores= True,return_dict_in_generate=True)
                         file.write(f"{processor.decode(model_output.sequences[0])}\n\n\n")
                         file.flush()
-                        proba_scores = torch.nn.functional.softmax(model_output[1][0][0],dim=-1)
-                        yes_proba = proba_scores[get_word_index(processor,"Yes")]
+                        proba_scores = torch.nn.functional.softmax(model_output.scores[0][0],dim=-1)
+                        yes_proba = proba_scores[get_word_index(processor,"▁Yes")]
+                        yes_proba += proba_scores[get_word_index(processor,"▁yes")]
+                        no_proba = proba_scores[get_word_index(processor,"▁no")]
+                        no_proba += proba_scores[get_word_index(processor,"▁No")]
+                        
+                        yes_proba += proba_scores[get_word_index(processor,"Yes")] #In instruct blip the prediction is not at the begening of the word
                         yes_proba += proba_scores[get_word_index(processor,"yes")]
-                        no_proba = proba_scores[get_word_index(processor,"no")]
+                        no_proba += proba_scores[get_word_index(processor,"no")]
                         no_proba += proba_scores[get_word_index(processor,"No")]
+
                         file.write(f"proba of saying yes: {yes_proba}\nproba of saying no: {no_proba} \n\n")
                         file.flush()
 
