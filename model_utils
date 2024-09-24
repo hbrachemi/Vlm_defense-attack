@@ -36,11 +36,21 @@ def encoder_QKV(vlm:str,model):
             encoder_V = [encoder_leaf_nodes[4+i*9] for i in range(24)] 
             encoder_Q = [encoder_leaf_nodes[5+i*9] for i in range(24)]
             encoder_proj = [encoder_leaf_nodes[6+i*9] for i in range(24)]
-            
+            encoder_norm_qkv = [encoder_leaf_nodes[7+i*9] for i in range(24)] 
+            encoder_fc1 = [encoder_leaf_nodes[9+i*9] for i in range(24)]
+            encoder_fc2 = [encoder_leaf_nodes[10+i*9] for i in range(24)]
+            encoder_mlp_norm = [encoder_leaf_nodes[11+i*9] for i in range(24)]
+
             encoder_QKV_dict['K'] = encoder_K
             encoder_QKV_dict['Q'] = encoder_Q
             encoder_QKV_dict['V'] = encoder_V
             encoder_QKV_dict['proj'] = encoder_proj
+            encoder_QKV_dict['encoder_norm_qkv'] = encoder_norm_qkv
+            encoder_QKV_dict['encoder_fc1'] = encoder_fc1
+            encoder_QKV_dict['encoder_fc2'] = encoder_fc2
+            encoder_QKV_dict['encoder_mlp_norm'] = encoder_mlp_norm
+
+    
     
         case "instruct_blip":
             encoder = model.get_submodule("vision_model").get_submodule("encoder")
@@ -53,9 +63,18 @@ def encoder_QKV(vlm:str,model):
             
             encoder_qkv = [encoder_leaf_nodes[1+i*8] for i in range(39)]
             encoder_proj = [encoder_leaf_nodes[2+i*8] for i in range(39)]
+            encoder_norm_qkv = [encoder_leaf_nodes[3+i*8] for i in range(39)] 
+            encoder_fc1 = [encoder_leaf_nodes[5+i*8] for i in range(39)]
+            encoder_fc2 = [encoder_leaf_nodes[6+i*8] for i in range(39)]
+            encoder_mlp_norm = [encoder_leaf_nodes[7+i*8] for i in range(39)]
+
             encoder_QKV_dict['qkv'] = encoder_qkv
             encoder_QKV_dict['proj'] = encoder_proj
-   
+            encoder_QKV_dict['encoder_norm_qkv'] = encoder_norm_qkv
+            encoder_QKV_dict['encoder_fc1'] = encoder_fc1
+            encoder_QKV_dict['encoder_fc2'] = encoder_fc2
+            encoder_QKV_dict['encoder_mlp_norm'] = encoder_mlp_norm
+
         case _:
             raise Exception("Sorry the provided vlm is not within this list, try extracting the QKV layers manually")
             
