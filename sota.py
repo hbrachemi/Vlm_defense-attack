@@ -74,10 +74,10 @@ def generate_sota_untargeted_PRM(image,boxes,label,p,model,vlm,processor,patch_d
     
     for i in range(len(encoder["encoder_mlp_norm"])):
         list_hooks[i].remove()
-    
+    loss_hist = []
+
     with tqdm(range(steps), total=steps) as pbar:
         for step in pbar:
-            loss_hist = []
             optimizer.zero_grad()
             loss = torch.zeros(1).to(device)
             
@@ -97,7 +97,7 @@ def generate_sota_untargeted_PRM(image,boxes,label,p,model,vlm,processor,patch_d
                 list_hooks[i].remove()
             
             for i in range(len(encoder["encoder_mlp_norm"])):
-                loss+= torch.nn.CosineEmbeddingLoss()(clean_features[str(i)][0,list_patches],adv_features[str(i)][0,list_patches],torch.ones(len(list_patches)).to(device))
+                loss+= torch.nn.CosineEmbeddingLoss()(clean_features[str(i)][0,list_patches],adv_features[str(i)][0,list_patches],-torch.ones(len(list_patches)).to(device))
                 #loss += F.cosine_similarity(clean_features[str(i)][0,list_patches],adv_features[str(i)][0,list_patches]).mean()
             loss.backward()
         
@@ -118,6 +118,9 @@ def generate_sota_untargeted_PRM(image,boxes,label,p,model,vlm,processor,patch_d
             early_stopping(loss.item(), image)
             if early_stopping.early_stop:
                 print("early_stopping")
+                loss_dict = {"overall":loss_hist}
+                plot_losses(loss_dict,save_loss=True,path = f"{path}/hist/{img_name}")
+
                 break
             
             if (step+1) % checkpoint == 0 :
@@ -132,4 +135,4 @@ def generate_sota_untargeted_PRM(image,boxes,label,p,model,vlm,processor,patch_d
     end = time.time()
     kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
     save_image(im,f"{path}/best/{img_name}_best.png",normalized=True,processor=processor)
-    return T.ToPILImage()(best_image[0]),end-start
+    return best_image,end-start
