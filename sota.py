@@ -2,7 +2,6 @@ from attack_utils import *
 import torchvision.transforms as T
 from tqdm import tqdm
 
-
 def generate_sota_targeted(image,p,model,processor,target_label=None,optimizer='adam',lr=1e-3,steps=100,early_stop=5):
 
     inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
@@ -44,10 +43,7 @@ def generate_sota_targeted(image,p,model,processor,target_label=None,optimizer='
 
 
 
-
-def generate_sota_untargeted_PRM(image,boxes,p,model,vlm,processor,patch_dim=14,optimizer='adam',lr=1e-3,steps=100,early_stop=5,perturbation_budget=None):
-
-    
+def generate_sota_untargeted_PRM(image,boxes,label,p,model,vlm,processor,patch_dim=14,optimizer='adam',lr=1e-3,steps=100,early_stop=5,perturbation_budget=None,path='./',checkpoint=100,img_name='test.png'):    
     inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
     im = torch.nn.Parameter(inputs.pop('pixel_values').to(model.device), requires_grad=True)
     optimizer = initialize_optimizer(optimizer,im,lr)
@@ -58,6 +54,9 @@ def generate_sota_untargeted_PRM(image,boxes,p,model,vlm,processor,patch_dim=14,
 
     device = model.device
 
+    start = time.time()
+    early_stopping = EarlyStopping(patience=early_stop, delta=0.001)
+    
     #register clean features:
     encoder = encoder_QKV(vlm,model)
    
@@ -78,6 +77,7 @@ def generate_sota_untargeted_PRM(image,boxes,p,model,vlm,processor,patch_dim=14,
     
     with tqdm(range(steps), total=steps) as pbar:
         for step in pbar:
+            loss_hist = []
             optimizer.zero_grad()
             loss = torch.zeros(1).to(device)
             
@@ -103,19 +103,33 @@ def generate_sota_untargeted_PRM(image,boxes,p,model,vlm,processor,patch_dim=14,
         
             if im.grad is None:
                 raise Exception("image is not being updated, check gradients...")
+
+            if perturbation_budget is not None:
+                im.grad.clamp_(-perturbation_budget,perturbation_budget)
             
             optimizer.step()
             
-            #if perturbation_budget is not None:
-                #fill this later
             for channel in range(3):
                 im[:,channel,:].data.clamp_((0-means[channel])/stds[channel], (1-means[channel])/stds[channel])
             
+            loss_hist.append(loss.item())
             pbar.set_postfix(loss=loss.item())  
+
+            early_stopping(loss.item(), image)
+            if early_stopping.early_stop:
+                print("early_stopping")
+                break
             
+            if (step+1) % checkpoint == 0 :
+                loss_dict = {"overall":loss_hist}
+                plot_losses(loss_dict,save_loss=True,path = f"{path}/hist/{img_name}")
+
     im = im.detach().clone()
     for c in range(3):
             im[0,c,:] *= processor.image_processor.image_std[c]
             im[0,c,:] += processor.image_processor.image_mean[c]
-          
-    return T.ToPILImage()(im[0])
+    best_image = early_stopping.best_image
+    end = time.time()
+    kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
+    save_image(im,f"{path}/best/{img_name}_best.png",normalized=True,processor=processor)
+    return T.ToPILImage()(best_image[0]),end-start
