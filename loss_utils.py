@@ -78,31 +78,27 @@ def redistribute_probabilities(A, tokens):
     to the indices in `tokens` are set to 0, but the sum of each column remains 1.
 
     Args:
-        A (Batch_size x heads x n x n): the multihead attention matrix where each column sums to 1.
+        A(heads x n x n): the multihead attention matrix where each column sums to 1.
         tokens: A list of column indices that should be set to 0.
 
     Returns:
         A matrix with the modified attention distribution.
     """
-    A = torch.clone(A)  # Clone the tensor to avoid in-place modifications
-    n = A.shape[-1]     # n is the number of columns (sequence length)
-
-    for head in range(A.shape[1]):  # Loop over attention heads
-        # Sum up attention for the specified tokens
-        prob_sum = torch.sum(A[:, head, :, tokens], dim=2, keepdim=True)  # Sum along token columns
+    A = torch.clone(A)
+    n = A.shape[-1]  
+    for head in range(A.shape[0]):
+        prob_sum = torch.sum(A[head,:,tokens],axis=1).unsqueeze(1) #total contribution of patches 
         
-        # Set the attention values for these tokens to 0
-        A[:, head, :, tokens] = 0
+        A[head,:,tokens] = 0
 
-        # Get the indices of columns not in tokens
-        other_columns = [i for i in range(n) if i not in tokens]
+        other_columns = [i for i in range(n) if i not in tokens] #where to distribute attention
 
-        # Redistribute the summed attention to the other columns
-        A[:, head, :, other_columns] += prob_sum / len(other_columns)  # Distribute equally
+        A[head,:,other_columns] += prob_sum.expand(A[head,:,other_columns].shape)/len(other_columns) 
+    
     
     return A
     
-def extract_target_hidden_states(model,inputs,im,vlm,tokens,target_layer,num_heads=16):
+def extract_target_hidden_states(model,inputs,im,vlm,tokens,target_layer=-1,num_heads=16):
     """
      Computes the hidden states if attention coefficients given to ROI patches were 0.
 
@@ -114,13 +110,16 @@ def extract_target_hidden_states(model,inputs,im,vlm,tokens,target_layer,num_hea
     Returns:
         A vector with the new target hidden states.
     """
-    
     encoder = encoder_QKV(vlm,model)
-    K = encoder["K"]
-    Q = encoder["Q"]
-    V = encoder["V"]
     proj = encoder["proj"]
-    
+
+    if "K" in encoder.keys():
+        K = encoder["K"]
+        Q = encoder["Q"]
+        V = encoder["V"]
+    else:
+        QKV = encoder["qkv"]
+        
     #Extract first QKV
     activations = {}
     
@@ -129,38 +128,53 @@ def extract_target_hidden_states(model,inputs,im,vlm,tokens,target_layer,num_hea
                     activations[name]=output
                 return hook_fn
         
-    hook_handle_v = V[0].register_forward_hook(get_activation('V'))
-    hook_handle_k = K[0].register_forward_hook(get_activation('K'))
-    hook_handle_q = Q[0].register_forward_hook(get_activation('Q'))
+    if "K" in encoder.keys():
+        hook_handle_v = V[0].register_forward_hook(get_activation('V'))
+        hook_handle_k = K[0].register_forward_hook(get_activation('K'))
+        hook_handle_q = Q[0].register_forward_hook(get_activation('Q'))
     
-    model_output = model(**inputs,pixel_values=im)
+        model_output = model(**inputs,pixel_values=im)
     
-    hook_handle_v.remove()                
-    hook_handle_k.remove()                
-    hook_handle_q.remove()                
+        hook_handle_v.remove()                
+        hook_handle_k.remove()                
+        hook_handle_q.remove()                
+        
+        layer_output_v = activations['V']
+        layer_output_k = activations['K']
+        layer_output_q = activations['Q']          
+    
+        #Compute first attention matrix
+        _, attention_weights = self_attention_MH(layer_output_q, layer_output_k, None)
+        
+        batch_size, seq_len, embed_dim = layer_output_q.size()
+        head_dim = embed_dim // num_heads
+        
+        layer_output_v = layer_output_v.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
+        value = layer_output_v.contiguous().view(batch_size * num_heads, seq_len, head_dim)
+        proj_result = torch.bmm(A, value)
+        proj_result = proj_result.view(batch_size, num_heads, seq_len, head_dim)
+        proj_result = proj_result.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+        
+    else:
 
-    layer_output_v = activations['V']
-    layer_output_k = activations['K']
-    layer_output_q = activations['Q']
-                
-    
-    #Compute first attention matrix
-    _, attention_weights = self_attention_MH(layer_output_q, layer_output_k, None)
+        hook_handle_qkv = QKV[0].register_forward_hook(get_activation('QKV'))
+        model_output = model(**inputs,pixel_values=im)
+        hook_handle_qkv.remove()
+        layer_output_qkv = activations['QKV']
+        _, attention_weights = self_attention_MH(None, None, None,layer_output_qkv)
 
-    #Redistribute attention
-    A = redistribute_probabilities(attention_weights, tokens)
-    
-    #Compute new hidden states if attention of ROI was 0
-    batch_size, seq_len, embed_dim = layer_output_q.size()
-    head_dim = embed_dim // num_heads
-    
-    layer_output_v = layer_output_v.view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
-    value = layer_output_v.contiguous().view(batch_size * num_heads, seq_len, head_dim)
-    proj_result = torch.bmm(A, value)
-    # Reshape the output back to (batch_size, seq_len, embed_dim)
-    proj_result = proj_result.view(batch_size, num_heads, seq_len, head_dim)
-    proj_result = proj_result.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
+        A = redistribute_probabilities(attention_weights, tokens)
 
+        batch_size, seq_len, concat_embed_dim = layer_output_qkv.size()
+        embed_dim = concat_embed_dim //3
+        head_dim = embed_dim // num_heads
+        layer_output_qkv = layer_output_qkv.view(batch_size, seq_len, 3, num_heads, embed_dim // num_heads).permute(2, 0, 3, 1, 4)
+        _, _, value = layer_output_qkv[0], layer_output_qkv[1], layer_output_qkv[2]
+        
+        proj_result = torch.matmul(A, value).permute(0, 2, 1, 3)
+        new_proj_result_shape = proj_result.size()[:-2] + (embed_dim,)
+        proj_result = proj_result.contiguous().view(new_proj_result_shape)
+    
 
     def create_replace_input_hook(new_input):
         def replace_input_hook(module, input):
@@ -168,27 +182,60 @@ def extract_target_hidden_states(model,inputs,im,vlm,tokens,target_layer,num_hea
         return replace_input_hook
     
     hook_handle = proj[0].register_forward_pre_hook(create_replace_input_hook(proj_result))
-
     
     activations_target = {}
     
     def get_activation(name):
                 def hook_fn(module, input, output):
-                    activations_target[name]=output.detach()
+                    activations_target[name]=output.detach().clone()
                 return hook_fn
+    def get_input(name):
+                def hook_fn(module, input, output):
+                    activations_target[name]=input[0].detach().clone()
+                return hook_fn
+    
+    if "K" in encoder.keys():
+        hook_handle_v = V[target_layer].register_forward_hook(get_activation('V'))
+        hook_handle_k = K[target_layer].register_forward_hook(get_activation('K'))
+        hook_handle_q = Q[target_layer].register_forward_hook(get_activation('Q'))
+        hook_handle_proj = proj[target_layer].register_forward_hook(get_activation('proj'))
+        hook_handle_encoder_norm_qkv = encoder['encoder_norm_qkv'][target_layer].register_forward_hook(get_activation('encoder_norm_qkv'))
+        hook_handle_encoder_fc1 = encoder['encoder_fc1'][target_layer].register_forward_hook(get_activation('encoder_fc1'))
+        hook_handle_encoder_fc2 = encoder['encoder_fc2'][target_layer].register_forward_hook(get_activation('encoder_fc2'))
+        hook_handle_encoder_mlp_norm = encoder['encoder_mlp_norm'][target_layer].register_forward_hook(get_activation('encoder_mlp_norm'))
         
-    hook_handle_v = V[target_layer].register_forward_hook(get_activation('V'))
-    hook_handle_k = K[target_layer].register_forward_hook(get_activation('K'))
-    hook_handle_q = Q[target_layer].register_forward_hook(get_activation('Q'))
-    hook_handle_proj = proj[target_layer].register_forward_hook(get_activation('proj'))
+        model_output = model(**inputs,pixel_values=im)
     
-    model_output = model(**inputs,pixel_values=im)
+        hook_handle_v.remove()                
+        hook_handle_k.remove()                
+        hook_handle_q.remove()   
+        hook_handle_proj.remove()
+        hook_handle_encoder_norm_qkv.remove()
+        hook_handle_encoder_fc1.remove()
+        hook_handle_encoder_fc2.remove()
+        hook_handle_encoder_mlp_norm.remove()
     
+    else:
+        hook_handle_qkv = QKV[target_layer].register_forward_hook(get_activation('qkv'))
+        hook_handle_proj = proj[target_layer].register_forward_hook(get_activation('proj'))
+        hook_handle_input = QKV[target_layer].register_forward_hook(get_input('input'))
+        hook_handle_proj = proj[target_layer].register_forward_hook(get_activation('proj'))
+        hook_handle_encoder_norm_qkv = encoder['encoder_norm_qkv'][target_layer].register_forward_hook(get_activation('encoder_norm_qkv'))
+        hook_handle_encoder_fc1 = encoder['encoder_fc1'][target_layer].register_forward_hook(get_activation('encoder_fc1'))
+        hook_handle_encoder_fc2 = encoder['encoder_fc2'][target_layer].register_forward_hook(get_activation('encoder_fc2'))
+        hook_handle_encoder_mlp_norm = encoder['encoder_mlp_norm'][target_layer].register_forward_hook(get_activation('encoder_mlp_norm'))
+        
+        model_output = model(**inputs,pixel_values=im)
+    
+        hook_handle_qkv.remove()                
+        hook_handle_proj.remove()
+        hook_handle_input.remove()
+        hook_handle_encoder_norm_qkv.remove()
+        hook_handle_encoder_fc1.remove()
+        hook_handle_encoder_fc2.remove()
+        hook_handle_encoder_mlp_norm.remove()
+
     hook_handle.remove()
-    hook_handle_v.remove()                
-    hook_handle_k.remove()                
-    hook_handle_q.remove()   
-    hook_handle_proj.remove()
 
     return activations_target
    
