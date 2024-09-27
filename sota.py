@@ -128,11 +128,14 @@ def generate_sota_untargeted_PRM(image,boxes,label,p,model,vlm,processor,patch_d
                 plot_losses(loss_dict,save_loss=True,path = f"{path}/hist/{img_name}")
 
     im = im.detach().clone()
-    for c in range(3):
-            im[0,c,:] *= processor.image_processor.image_std[c]
-            im[0,c,:] += processor.image_processor.image_mean[c]
     best_image = early_stopping.best_image
     end = time.time()
     kw_args = {"exec_time":end-start,"num_patches":len(list_patches)}
     save_image(im,f"{path}/best/{img_name}_best.png",normalized=True,processor=processor)
+    
+    f = open(f"{path}/best/{img_name}_best.txt", "a")
+    for key in list(kw_args.keys()):
+        f.write(f"{key}:{kw_args[key]}\n")
+    f.close()
+    
     return best_image,end-start
