@@ -1,4 +1,4 @@
-from transformers import AutoProcessor, LlavaForConditionalGeneration, InstructBlipProcessor, InstructBlipForConditionalGeneration #LlavaNextProcessor, LlavaNextForConditionalGeneration
+from transformers import CLIPProcessor, CLIPModel
 
 import copy 
 
@@ -7,14 +7,35 @@ import copy
 def vlm_pretrained(vlm:str):
     match vlm:
         case "instruct_blip":
+            from transformers import InstructBlipProcessor, InstructBlipForConditionalGeneration 
             model = InstructBlipForConditionalGeneration.from_pretrained("Salesforce/instructblip-vicuna-7b",device_map='auto')
             processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-vicuna-7b",device_map='auto')
         case "Llava-7b":
+            from transformers import AutoProcessor, LlavaForConditionalGeneration
             model = LlavaForConditionalGeneration.from_pretrained("llava-hf/llava-1.5-7b-hf",device_map = 'auto')
             processor = AutoProcessor.from_pretrained(pretrained_model_name_or_path="llava-hf/llava-1.5-7b-hf",device_map = 'auto')
         case "Llava-13b":
             model = LlavaForConditionalGeneration.from_pretrained("llava-hf/llava-v1.6-vicuna-13b-hf",device_map = 'auto')
             processor = LlavaNextProcessor.from_pretrained(pretrained_model_name_or_path="llava-hf/llava-v1.6-vicuna-13b-hf",device_map = 'auto')
+        case "Blip-2":
+            from transformers import Blip2Processor, Blip2ForConditionalGeneration
+            processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
+            model = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b", load_in_8bit=True,device_map={"": 0})
+        case "Qwen":
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers.generation import GenerationConfig
+            tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen-VL", trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen-VL", device_map="cuda", trust_remote_code=True)
+            model.generation_config = GenerationConfig.from_pretrained("Qwen/Qwen-VL", trust_remote_code=True)
+        case "CLIP":
+            from transformers import CLIPProcessor, CLIPModel
+            model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+            processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        case "Fuyu":
+            from transformers import FuyuProcessor, FuyuForCausalLM
+            processor = FuyuProcessor.from_pretrained('adept/fuyu-8b')
+            model = FuyuForCausalLM.from_pretrained('adept/fuyu-8b', device_map="auto")
+
         
     model = model.eval()
     return model,processor
@@ -40,7 +61,7 @@ def encoder_QKV(vlm:str,model):
             encoder_fc1 = [encoder_leaf_nodes[9+i*9] for i in range(24)]
             encoder_fc2 = [encoder_leaf_nodes[10+i*9] for i in range(24)]
             encoder_mlp_norm = [encoder_leaf_nodes[11+i*9] for i in range(24)]
-
+            
             encoder_QKV_dict['K'] = encoder_K
             encoder_QKV_dict['Q'] = encoder_Q
             encoder_QKV_dict['V'] = encoder_V
@@ -50,9 +71,33 @@ def encoder_QKV(vlm:str,model):
             encoder_QKV_dict['encoder_fc2'] = encoder_fc2
             encoder_QKV_dict['encoder_mlp_norm'] = encoder_mlp_norm
 
-    
-    
-        case "instruct_blip":
+        case "CLIP":
+            encoder = model.get_submodule("vision_model").get_submodule("encoder")
+
+            encoder_leaf_nodes = [module for module in encoder.modules()
+                  if len(list(module.children())) == 0]
+
+            encoder_K = [encoder_leaf_nodes[0+i*9] for i in range(12)]
+            encoder_V = [encoder_leaf_nodes[1+i*9] for i in range(12)] 
+            encoder_Q = [encoder_leaf_nodes[2+i*9] for i in range(12)]
+            encoder_proj = [encoder_leaf_nodes[3+i*9] for i in range(12)]
+            
+            encoder_norm_qkv = [encoder_leaf_nodes[4+i*9] for i in range(12)] 
+            
+            encoder_fc1 = [encoder_leaf_nodes[6+i*9] for i in range(12)]
+            encoder_fc2 = [encoder_leaf_nodes[7+i*9] for i in range(12)]
+            encoder_mlp_norm = [encoder_leaf_nodes[8+i*9] for i in range(12)]
+            
+            encoder_QKV_dict['K'] = encoder_K
+            encoder_QKV_dict['Q'] = encoder_Q
+            encoder_QKV_dict['V'] = encoder_V
+            encoder_QKV_dict['proj'] = encoder_proj
+            encoder_QKV_dict['encoder_norm_qkv'] = encoder_norm_qkv
+            encoder_QKV_dict['encoder_fc1'] = encoder_fc1
+            encoder_QKV_dict['encoder_fc2'] = encoder_fc2
+            encoder_QKV_dict['encoder_mlp_norm'] = encoder_mlp_norm
+
+        case "instruct_blip" | "Blip-2":
             encoder = model.get_submodule("vision_model").get_submodule("encoder")
             decoder = model.get_submodule("language_model")
 
@@ -74,6 +119,61 @@ def encoder_QKV(vlm:str,model):
             encoder_QKV_dict['encoder_fc1'] = encoder_fc1
             encoder_QKV_dict['encoder_fc2'] = encoder_fc2
             encoder_QKV_dict['encoder_mlp_norm'] = encoder_mlp_norm
+
+
+        case "Qwen":
+            encoder = model.get_submodule("transformer").get_submodule("visual")
+            decoder = model.get_submodule("lm_head")
+
+            encoder_leaf_nodes = [module for module in encoder.modules()
+                  if len(list(module.children())) == 0]
+            decoder_leaf_nodes = [module for module in decoder.modules()
+                  if len(list(module.children())) == 0]
+            
+            encoder_qkv = [encoder_leaf_nodes[4+i*7] for i in range(48)]
+            encoder_proj = [encoder_leaf_nodes[5+i*7] for i in range(48)]
+            encoder_norm_qkv = [encoder_leaf_nodes[2+i*7] for i in range(48)] 
+            encoder_fc1 = [encoder_leaf_nodes[6+i*7] for i in range(48)]
+            encoder_fc2 = [encoder_leaf_nodes[8+i*7] for i in range(48)]
+            encoder_mlp_norm = [encoder_leaf_nodes[3+i*7] for i in range(48)]
+
+            encoder_QKV_dict['qkv'] = encoder_qkv
+            encoder_QKV_dict['proj'] = encoder_proj
+            encoder_QKV_dict['encoder_norm_qkv'] = encoder_norm_qkv
+            encoder_QKV_dict['encoder_fc1'] = encoder_fc1
+            encoder_QKV_dict['encoder_fc2'] = encoder_fc2
+            encoder_QKV_dict['encoder_mlp_norm'] = encoder_mlp_norm
+
+        case "Fuyu":
+            encoder = model.get_submodule("language_model")
+            
+            encoder_qkv = [ model.language_model.model.layers[i].self_attn.query_key_value for i in range(len(model.language_model.model.layers))]
+            encoder_proj = [model.language_model.model.layers[i].self_attn.dense for i in range(len(model.language_model.model.layers))]
+            encoder_q_layernorm = [model.language_model.model.layers[i].self_attn.q_layernorm for i in range(len(model.language_model.model.layers))]
+            encoder_k_layernorm = [model.language_model.model.layers[i].self_attn.k_layernorm for i in range(len(model.language_model.model.layers))]
+            encoder_rotary_emb = [model.language_model.model.layers[i].self_attn.rotary_emb for i in range(len(model.language_model.model.layers))]
+
+            encoder_input_ln = [model.language_model.model.layers[i].input_layernorm for i in range(len(model.language_model.model.layers))]
+
+
+            encoder_fc1 = [model.language_model.model.layers[i].mlp.dense_h_to_4h for i in range(len(model.language_model.model.layers))]
+            encoder_fc2 = [model.language_model.model.layers[i].mlp.dense_4h_to_h for i in range(len(model.language_model.model.layers))]
+
+
+            encoder_post_ln = [model.language_model.model.layers[i].post_attention_layernorm for i in range(len(model.language_model.model.layers))]
+
+            
+            encoder_QKV_dict['qkv'] = encoder_qkv
+            encoder_QKV_dict['proj'] = encoder_proj
+            encoder_QKV_dict['encoder_fc1'] = encoder_fc1
+            encoder_QKV_dict['encoder_fc2'] = encoder_fc2
+
+            encoder_QKV_dict['q_layernorm'] = encoder_q_layernorm
+            encoder_QKV_dict['k_layernorm'] = encoder_k_layernorm
+            encoder_QKV_dict['rotary_emb'] = encoder_rotary_emb
+
+            encoder_QKV_dict['encoder_input_ln'] = encoder_input_ln
+            encoder_QKV_dict['encoder_post_ln'] = encoder_post_ln
 
         case _:
             raise Exception("Sorry the provided vlm is not within this list, try extracting the QKV layers manually")
