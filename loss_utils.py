@@ -4,7 +4,7 @@ from model_utils import encoder_QKV
 
 def extract_q_k_v_from_qkv(layer_qkv_output,num_heads = 16,vlm='instruct_blip'):
     if vlm == 'instruct_blip':
-        batch_size, seq_len, concat_embed_dim = layer_qkv_output.shape()
+        batch_size, seq_len, concat_embed_dim = layer_qkv_output.shape
         embed_dim = concat_embed_dim //3
         head_dim = embed_dim // num_heads
         layer_qkv_output = layer_qkv_output.view(batch_size, seq_len, 3, num_heads, embed_dim // num_heads).permute(2, 0, 3, 1, 4)
