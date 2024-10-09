@@ -11,7 +11,6 @@ caption_prompts = [
 ]
 
 
-
 possible_prompts = classif_prompts+caption_prompts
 
 import pickle 
@@ -56,9 +55,32 @@ def initialize_optimizer(optim_name,image,lr):
         optimizer = optim.SGD([image], lr=lr)
     return optimizer
 
+import torch
+import torchvision.transforms as T
 
+def depatchify_fuyu_image(patches, original_image_shape, patch_size) -> "torch.Tensor":
+        """
+        Convert patchified image into a 3-channeled tensor image.
+        (Inverse operation of patchify : https://github.com/huggingface/transformers/blob/main/src/transformers/models/fuyu/image_processing_fuyu.py)
+        """
 
-def get_target_patches(image,boxes,w,h,patch_dim):
+        batch_size, channels, orig_height, orig_width = original_image_shape
+        patch_height, patch_width = patch_size
+
+        # Number of patches along height and width
+        num_patches_height = orig_height // patch_height
+        num_patches_width = orig_width // patch_width
+    
+        # Reshape the patches to (batch_size, num_patches_height, num_patches_width, patch_height, patch_width, channels)
+        patches = patches.view(batch_size, num_patches_height, num_patches_width, patch_height, patch_width, channels)
+    
+        # Permute to match the original image dimensions: (batch_size, channels, height, width)
+        patches = patches.permute(0, 5, 1, 3, 2, 4).contiguous()
+        reconstructed_image = patches.view(batch_size, channels, orig_height, orig_width)
+    
+        return reconstructed_image
+
+def get_target_patches(image,boxes,w,h,patch_dim,input_ids=None,patch_ids=None):
     list_patches = []
     for index in range((w*h)//(patch_dim**2)):        
         l_grid =  index // (w//patch_dim)
@@ -66,7 +88,14 @@ def get_target_patches(image,boxes,w,h,patch_dim):
         for box in boxes:
             if l_grid*patch_dim >= box[1] and l_grid*patch_dim < box[3] and c_grid*patch_dim >= box[0] and c_grid < box[2]:
                 list_patches.append(index+1)
+    if input_ids is not None and patch_ids is not None:
+        #In Fuyu both image and text modalities are mixed, we have to further retrieve patch_ids in hidden activations 
+        dst_indices = torch.nonzero(patch_ids[0] >= 0, as_tuple=True)[0]
+        list_patches = dst_indices[list_patches]
+        
     return list_patches
+
+
 
 
 def get_word_index(processor,word):
@@ -87,62 +116,97 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                             for key in list(kw_args.keys()):
                                 file.write(f"{key}: {kw_args[key]}\n\n\n")
                                 file.flush()
-                        
-                        prompt = f"USER: <image> \nIs there any {label} apparent in the image?\nASSISTANT:"
-                        if vlm == 'instruct_blip':
-                            prompt = prompt.replace('USER: <image> ','').replace('ASSISTANT:','')
-                        
-                        inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
-                        inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
-        
-                        model_output = model.generate(**inputs,max_length=1000,output_scores= True,return_dict_in_generate=True)
-                        file.write(f"{processor.decode(model_output.sequences[0])}\n\n\n")
-                        file.flush()
-                        proba_scores = torch.nn.functional.softmax(model_output.scores[0][0],dim=-1)
-                        yes_proba = proba_scores[get_word_index(processor,"▁Yes")]
-                        yes_proba += proba_scores[get_word_index(processor,"▁yes")]
-                        no_proba = proba_scores[get_word_index(processor,"▁no")]
-                        no_proba += proba_scores[get_word_index(processor,"▁No")]
-                        
-                        yes_proba += proba_scores[get_word_index(processor,"Yes")] #In instruct blip the prediction is not at the begening of the word
-                        yes_proba += proba_scores[get_word_index(processor,"yes")]
-                        no_proba += proba_scores[get_word_index(processor,"no")]
-                        no_proba += proba_scores[get_word_index(processor,"No")]
-
-                        file.write(f"proba of saying yes: {yes_proba}\nproba of saying no: {no_proba} \n\n")
-                        file.flush()
-
-                        prompt = f"USER: <image>.\nASSISTANT:"
-                        if vlm == 'instruct_blip':
-                            prompt = prompt.replace('USER: <image> ','').replace('ASSISTANT:','').replace("\n","")
-
-                        inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
-                        inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
-        
-                        model_output = model.generate(**inputs,max_length=1000,output_scores= True,return_dict_in_generate=True)
-                        file.write(f"{processor.decode(model_output.sequences[0])}\n\n\n")
-                        file.flush()
-
-                        if other_prompts is not None:
-                            for p in other_prompts:
-                                if vlm == 'instruct_blip':
-                                    p = p.replace('USER: <image> ','').replace('ASSISTANT:','').replace("\n","")
-                                inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
-                                inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
-                                model_output = model.generate(**inputs,max_length=1000)
-                                file.write(f"{processor.decode(model_output[0])}\n\n\n")
+                        if vlm == "CLIP":
+                                pos_prompt = f"An image of a {label}"
+                                neg_prompt = f"Not an image of a {label}"
+                                inputs = processor(text = [pos_prompt,neg_prompt], images = image, return_tensors="pt",padding=True).to(model.device)
+                                outputs = model(**inputs)
+                                logits_per_image = outputs.logits_per_image
+                                probs = logits_per_image.softmax(dim=1)
+                                yes_proba = probs[0][0]
+                                no_proba = probs[0][1]
+                            
+                                file.write(f"Yes proba:{yes_proba}\n")
+                                file.write(f"No proba:{no_proba}\n")
                                 file.flush()
-        
+                        else:
+                            prompt = f"USER: <image> \nIs there any {label} in the image?\nASSISTANT:"
+                            if vlm == 'instruct_blip':
+                                prompt = f"Is there any {label} apparent in the image?"                        
+                            inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
+                            try:
+                                inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
+                            except:
+                                pass
+                            model_output = model.generate(**inputs,max_length=1000,output_scores= True,return_dict_in_generate=True)
+                            file.write(f"{processor.decode(model_output.sequences[0])}\n\n\n")
+                            file.flush()
+                            proba_scores = torch.nn.functional.softmax(model_output.scores[0][0],dim=-1)
+                            try:
+                                yes_proba = proba_scores[get_word_index(processor,"▁Yes")]
+                                yes_proba += proba_scores[get_word_index(processor,"▁yes")]
+                                no_proba = proba_scores[get_word_index(processor,"▁no")]
+                                no_proba += proba_scores[get_word_index(processor,"▁No")]
+                        
+                                yes_proba += proba_scores[get_word_index(processor,"Yes")] #In instruct blip the prediction is not at the begening of the word
+                                yes_proba += proba_scores[get_word_index(processor,"yes")]
+                                no_proba += proba_scores[get_word_index(processor,"no")]
+                                no_proba += proba_scores[get_word_index(processor,"No")]
+                            except:
+                                yes_proba = proba_scores[get_word_index(processor,"Yes")] #In instruct blip the prediction is not at the begening of the word
+                                yes_proba += proba_scores[get_word_index(processor,"yes")]
+                                no_proba = proba_scores[get_word_index(processor,"no")]
+                                no_proba += proba_scores[get_word_index(processor,"No")]
+                            file.write(f"proba of saying yes: {yes_proba}\nproba of saying no: {no_proba} \n\n")
+                            file.flush()
+
+                            prompt = f"USER: <image>.\nASSISTANT:"
+                            if vlm == 'instruct_blip':
+                                prompt = prompt.replace('USER: <image> ','').replace('ASSISTANT:','').replace("\n","")
+                            if vlm == 'Fuyu':
+                                prompt = prompt.replace('USER: <image> ','').replace('ASSISTANT:','')
+                            inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
+                            try:
+                                inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
+                            except:
+                                pass
+                            model_output = model.generate(**inputs,max_length=1000,output_scores= True,return_dict_in_generate=True)
+                            file.write(f"{processor.decode(model_output.sequences[0])}\n\n\n")
+                            file.flush()
+
+                            if other_prompts is not None:
+                                for p in other_prompts:
+                                    if vlm == 'instruct_blip':
+                                        p = p.replace('USER: <image> ','').replace('ASSISTANT:','').replace("\n","")
+                                    inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
+                                    try:
+                                        inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
+                                    except: 
+                                        pass
+                                    model_output = model.generate(**inputs,max_length=1000)
+                                    file.write(f"{processor.decode(model_output[0])}\n\n\n")
+                                    file.flush()        
 import torchvision
 
-def save_image(image,path,normalized=False,processor=None):
+def save_image(image,path,normalized=False,processor=None,patchified=False,original_image_shape=None,patch_size=(30,30)):
+    if patchified:
+        image = depatchify_fuyu_image(image.clone(), original_image_shape, patch_size)
     if not normalized:
         torchvision.utils.save_image(image,f"{path}")
     if normalized and processor is not None:
         image = torch.clone(image)
+        
+        means = processor.image_processor.image_mean
+        stds = processor.image_processor.image_std
+
+        if not isinstance(means, (list, tuple)):
+            means = [means, means, means]
+        if not isinstance(stds, (list, tuple)):
+            stds = [stds, stds, stds]
+   
         for c in range(3):
-            image[0,c,:] *= processor.image_processor.image_std[c]
-            image[0,c,:] += processor.image_processor.image_mean[c]
+            image[0,c,:] *= stds[c]
+            image[0,c,:] += means[c]
             torchvision.utils.save_image(image,f"{path}")
 
 
@@ -157,28 +221,75 @@ def plot_losses(losses,save_loss=True,path = None):
         plt.show()
 
 def check_model_recognition(model,processor,image,label,vlm):
+    if vlm == "CLIP":
+            pos_prompt = f"An image of a {GT_data[label[0]][0]}"
+            neg_prompt = f"Not an image of a {GT_data[label[0]][0]}"
+            inputs = processor(text = [pos_prompt,neg_prompt], images = image, return_tensors="pt", padding=True).to(model.device)
+            outputs = model(**inputs)
+            logits_per_image = outputs.logits_per_image
+            probs = logits_per_image.softmax(dim=1)
+            yes_proba = probs[0][0]
+            no_proba = probs[0][1]
+        
+            return yes_proba > no_proba
+                           
+    prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} in the image?\nASSISTANT:"
+    
     if vlm == 'instruct_blip':
         prompt = f"Is there any {GT_data[label[0]]} apparent in the image?"
-    else:
-        prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
+    elif vlm =='Blip-2':
+        prompt = f"Question: are there any {GT_data[label[0]]} in this image? Answer:"
+    elif vlm == "Fuyu":
+        prompt = f"Are there any {GT_data[label[0]]} in this image?\n"
+
+
     inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
     model_output = model.generate(**inputs,max_new_tokens=1)
     model_output = processor.decode(model_output[0])
+    return "Yes" in model_output or "yes" in model_output
 
-    return "Yes" in model_output
+from torchvision import transforms
 
-def check_attack_convergence(model,processor,image,label,vlm):
-    
+def check_attack_convergence(model,processor,image,label,vlm,id=None,patchified=False,original_image_shape=None,patch_size=(30,30)):
+    pil_image = torch.clone(image)
+    pil_image = depatchify_fuyu_image(pil_image.clone(), original_image_shape, patch_size)
+
+    stds = processor.image_processor.image_std
+    means = processor.image_processor.image_mean
+    if isinstance(means, float):
+            means = [means, means, means]
+    if isinstance(stds, float):
+            stds = [stds, stds, stds]
+
+    for c in range(3):
+            pil_image[0,c,:] *= stds[c]
+            pil_image[0,c,:] += means[c]
+        
+    pil_image =  transforms.ToPILImage()(pil_image[0])
+
+    if vlm == "CLIP":
+            pos_prompt = f"An image of a {GT_data[label[0]][0]}"
+            neg_prompt = f"Not an image of a {GT_data[label[0]][0]}"
+            inputs = processor(text = [pos_prompt,neg_prompt], images = pil_image, return_tensors="pt", padding=True).to(model.device)
+            outputs = model(**inputs)
+            logits_per_image = outputs.logits_per_image
+            probs = logits_per_image.softmax(dim=1)
+            yes_proba = probs[0][0]
+            no_proba = probs[0][1]
+        
+            return yes_proba < no_proba
+    prompt = f"USER: <image> \nIs there any {label[0]} in the image?\nASSISTANT:"
     if vlm == 'instruct_blip':
-        prompt = f"Is there any {GT_data[label[0]]} apparent in the image?\n"
-    else:
-        prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} apparent in the image?\nASSISTANT:"
-    inputs = processor(text = prompt, images = torch.zeros((3,224,224)), return_tensors="pt").to(model.device)
-    inputs["pixel_values"] = image
+        prompt = f"Is there any {GT_data[label[0]]} apparent in the image?"
+    elif vlm =='Blip-2':
+        prompt = f"Question: are there any {GT_data[label[0]]} in this image? Answer:"
+    elif vlm =='Fuyu':
+        prompt = f"Are there any {GT_data[label[0]]} in this image?\n"
+    
+    inputs = processor(text = prompt, images = pil_image, return_tensors="pt").to(model.device)
     model_output = model.generate(**inputs,max_new_tokens =1)
     model_output = processor.decode(model_output[0])
-
-    return "No" in model_output or "no" in model_output
+    return "No" in model_output or "no" in model_output or "</s>No" in model_output or "</s>no" in model_output
     
 from losses import *
 from tqdm import tqdm
@@ -201,10 +312,12 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_la
     list_patches = get_target_patches(image,boxes,w,h,patch_dim)
     means = processor.image_processor.image_mean
     stds = processor.image_processor.image_std
-
-
-    inputs = processor(text = "USER: <image>\nASSISTANT:", images = image, return_tensors="pt").to(model.device)
-    im = torch.nn.Parameter(inputs.pop('pixel_values').to(model.device), requires_grad=True)
+    if vlm =='Fuyu':
+        inputs = processor(text = "An image of:\n", images = image, return_tensors="pt").to(model.device)
+        im = torch.nn.Parameter(inputs.pop('image_patches')[0].to(model.device), requires_grad=True)
+    else:
+        inputs = processor(text = "USER: <image>\nASSISTANT:", images = image, return_tensors="pt").to(model.device)
+        im = torch.nn.Parameter(inputs.pop('pixel_values').to(model.device), requires_grad=True)
     optimizer = initialize_optimizer(optimizer,im,lr)    
     
     loss_hist = []
@@ -238,6 +351,7 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_la
                 def hook_fn(module, input, output):
                     activations[name]=output
                 return hook_fn
+                
             def get_input(name):
                 def hook_fn(module, input, output):
                     activations[name]=input
@@ -274,7 +388,7 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_la
                         if lambda_e !=0:
                             loss_e += entropy_loss(layer_output_v)
                         if lambda_n !=0:
-                            loss_n += layer_output_v[list_patches].norm(dim=1).mean()
+                            loss_n += layer_output_v[0][list_patches].norm(dim=1).mean()
                         if lambda_pre_proj!=0:
                             loss_proj += layer_proj[0][list_patches].norm(dim=1).mean()
                         
@@ -287,7 +401,7 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,target_la
 
                         layer_output_qkv = activations['qkv']
                         layer_proj = activations['proj'][0]
-                        _ , _ , value = extract_q_k_v_from_qkv(layer_output_qkv)
+                        _ , _ , value = extract_q_k_v_from_qkv(layer_output_qkv,vlm=vlm)
                         
                         hook_handle_qkv.remove()   
                         hook_handle_proj.remove() 
