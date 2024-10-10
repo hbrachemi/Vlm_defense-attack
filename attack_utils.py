@@ -89,7 +89,9 @@ def get_target_patches(image,boxes,w,h,patch_dim,input_ids=None,patch_ids=None):
             if l_grid*patch_dim >= box[1] and l_grid*patch_dim < box[3] and c_grid*patch_dim >= box[0] and c_grid < box[2]:
                 list_patches.append(index+1)
     if input_ids is not None and patch_ids is not None:
-        #In Fuyu both image and text modalities are mixed, we have to further retrieve patch_ids in hidden activations 
+        #In Fuyu both image and text modalities are mixed, we have to further retrieve patch_ids in hidden activations
+        #Thus we select patches directly from image idx, no need for +1 of cls token
+        list_patches = [idx-1 for idx in list_patches]
         dst_indices = torch.nonzero(patch_ids[0] >= 0, as_tuple=True)[0]
         list_patches = dst_indices[list_patches]
         
@@ -252,7 +254,8 @@ from torchvision import transforms
 
 def check_attack_convergence(model,processor,image,label,vlm,id=None,patchified=False,original_image_shape=None,patch_size=(30,30)):
     pil_image = torch.clone(image)
-    pil_image = depatchify_fuyu_image(pil_image.clone(), original_image_shape, patch_size)
+    if patchified:
+        pil_image = depatchify_fuyu_image(pil_image.clone(), original_image_shape, patch_size)
 
     stds = processor.image_processor.image_std
     means = processor.image_processor.image_mean
