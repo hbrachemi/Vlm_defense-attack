@@ -2,42 +2,38 @@ import torch
 import torch.nn.functional as F
 from loss_utils import *
 
-
-
 class CustomMHAttentionLoss(torch.nn.Module):
-    def __init__(self, target_token_indices,qkv_state=False):
+    def __init__(self, target_token_indices):
         super(CustomMHAttentionLoss, self).__init__()
         
         self.target_token_indices = target_token_indices  
-        self.qkv_state = qkv_state
         
-    def forward(self, Q, K, QKV = None ,num_heads=16):
-        if not self.qkv_state:
-            batch_size, seq_len, embed_dim = Q.size()
-            head_dim = embed_dim // num_heads
-        
+    def forward(self,activations = {} ,num_heads=16, dropout_rate=0, vlm = None, model = None, inputs = None):
+        if 'Q' in list(activations.keys()):
+            batch_size, seq_len, embed_dim = activations['Q'].size()
+            head_dim = embed_dim // num_heads        
             if embed_dim % num_heads != 0:
-                raise ValueError("Embedding dimension must be divisible by the number of heads.")
-    
-            _, attention_weights = self_attention_MH(Q,K,None,None)
-
-        if self.qkv_state:
-            batch_size, seq_len, concat_embed_dim = QKV.size()
+                raise ValueError("Embedding dimension must be divisible by the number of heads.")    
+        else:
+            batch_size, seq_len, concat_embed_dim = activations['qkv'].size()
             embed_dim = concat_embed_dim // 3
             head_dim = embed_dim // num_heads
             
             if embed_dim % num_heads != 0:
                 raise ValueError("Embedding dimension must be divisible by the number of heads.")
             
-            _, attention_weights = self_attention_MH(None,None,None,QKV)
+        _, attention_weights = self_attention_MH(activations = activations,num_heads=num_heads, dropout_rate=dropout_rate, vlm = vlm, model = model, inputs = inputs)
+        
         target_attention_weights = attention_weights[:,:,:, self.target_token_indices]  
         
         if target_attention_weights.shape[-1]!= len(self.target_token_indices):
-                raise ValueError("Q,K or QKV must be of shape Batch_size x num_heads x len_seq x len_seq")
+                raise ValueError("Q,K or QKV must be of shape Batch_size x num_heads x len_seq")
 
         loss = target_attention_weights.mean()  
 
         return loss
+
+
 
 class CustomMHCEAttentionLoss(torch.nn.Module):
     def __init__(self, target_token_indices,qkv_state=False):
