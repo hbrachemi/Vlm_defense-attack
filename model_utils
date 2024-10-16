@@ -1,5 +1,3 @@
-from transformers import CLIPProcessor, CLIPModel
-
 import copy 
 
 
@@ -19,8 +17,8 @@ def vlm_pretrained(vlm:str):
             processor = LlavaNextProcessor.from_pretrained(pretrained_model_name_or_path="llava-hf/llava-v1.6-vicuna-13b-hf",device_map = 'auto')
         case "Blip-2":
             from transformers import Blip2Processor, Blip2ForConditionalGeneration
-            processor = Blip2Processor.from_pretrained("Salesforce/blip2-opt-2.7b")
-            model = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b", load_in_8bit=True,device_map={"": 0})
+            processor = Blip2Processor.from_pretrained("Salesforce/blip2-flan-t5-xl")
+            model = Blip2ForConditionalGeneration.from_pretrained("Salesforce/blip2-flan-t5-xl", load_in_8bit=True,device_map={"": 0})
         case "Qwen":
             from transformers import AutoModelForCausalLM, AutoTokenizer
             from transformers.generation import GenerationConfig
