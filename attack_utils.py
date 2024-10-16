@@ -1,12 +1,8 @@
 classif_prompts = [
     "USER: <image> How would you label this image with a single descriptor?. ASSISTANT:",
-    "USER: <image> image of  \nASSISTANT:",
-    "USER: <image> If you were a classification model, which label would you attribute to the image? ASSISTANT:",
 ]
 
 caption_prompts = [
-    "USER: <image> Elaborate on the elements present in this image. ASSISTANT:",
-    "USER: <image> Relate the main components of this picture in words. ASSISTANT:",
     "USER: <image> Offer a short description of the subjects present in this image. ASSISTANT:",
 ]
 
@@ -58,6 +54,7 @@ def initialize_optimizer(optim_name,image,lr):
 import torch
 import torchvision.transforms as T
 import os
+
 def depatchify_fuyu_image(patches, original_image_shape, patch_size) -> "torch.Tensor":
         """
         Convert patchified image into a 3-channeled tensor image.
@@ -138,6 +135,9 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
 
                             if vlm == 'Fuyu':
                                 prompt = f"Is there any {label} in this image?\n"
+                            if vlm == 'Blip-2':
+                                prompt = f"Question: are there any {label} in this image? Answer:"
+                                
                             inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
                             try:
                                 inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
@@ -185,6 +185,9 @@ def evaluate_image(model,processor,label,path,path_img,kw_args=None,other_prompt
                                         p = p.replace('USER: <image> ','').replace('ASSISTANT:','').replace("\n","")
                                     if vlm == "Fuyu":
                                         p = p.replace('USER: <image> ','').replace('ASSISTANT:','')
+                                    if vlm == 'Blip-2':
+                                        p = p.replace('USER: <image> ','Question:').replace('ASSISTANT:','Answer:').replace("\n","")
+
                                     inputs = processor(text = p, images = image, return_tensors="pt").to(model.device)
                                     try:
                                         inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
@@ -230,8 +233,8 @@ def plot_losses(losses,save_loss=True,path = None):
 def check_model_recognition(model,processor,image,label,vlm):
 
     if vlm == "CLIP":
-            pos_prompt = f"An image of a {GT_data[label[0]][0]}"
-            neg_prompt = f"Not an image of a {GT_data[label[0]][0]}"
+            pos_prompt = f"An image of a {GT_data[label[0]]}"
+            neg_prompt = f"Not an image of a {GT_data[label[0]]}"
             inputs = processor(text = [pos_prompt,neg_prompt], images = image, return_tensors="pt", padding=True).to(model.device)
             outputs = model(**inputs)
             logits_per_image = outputs.logits_per_image
@@ -277,7 +280,8 @@ def check_attack_convergence(model,processor,image,label,vlm,id=None,patchified=
             no_proba = probs[0][1]
         
             return yes_proba < no_proba
-    prompt = f"USER: <image> \nIs there any {label[0]} in the image?\nASSISTANT:"
+
+    prompt = f"USER: <image> \nIs there any {GT_data[label[0]]} in the image?\nASSISTANT:"
     if vlm == 'instruct_blip':
         prompt = f"Is there any {GT_data[label[0]]} apparent in the image?"
     elif vlm =='Blip-2':
@@ -297,7 +301,7 @@ from losses import *
 from tqdm import tqdm
 import time
 
-def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=1,targeted_block=-1,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,lambda_pre_proj=0,w=336,h=336,patch_dim=14,steps=1000,num_heads=None,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5,check_convergence_rate=100,vlm='Llava-7b'):
+def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=1,targeted_block=-1,lambda_a=1,lambda_e=0,lambda_n=0,lambda_p=0,w=336,h=336,patch_dim=14,steps=1000,num_heads=None,checkpoint=100,path='./',img_name='test',att='mean',early_stop=5,check_convergence_rate=100,vlm='Llava-7b'):
     original_image_shape = (1,3,image.size[1],image.size[0])
     encoder = encoder_QKV(vlm,model)
     
@@ -333,7 +337,6 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=
     loss_hist_e = []
     loss_hist_n = []
     loss_hist_p = []
-    loss_hist_proj = []
     
     if att == 'mean':
         att_loss = CustomMHAttentionLoss(list_patches)
@@ -366,7 +369,6 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=
             loss_e = torch.zeros(1)
             loss_n = torch.zeros(1)
             loss_p = torch.zeros(1)
-            loss_proj = torch.zeros(1)
             list_hooks = []
             for l in range(targeted_block):
                 for l_key in list(encoder.keys()):
@@ -396,20 +398,23 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=
                 else:
                     query,key,layer_output_v = extract_q_k_v_from_qkv(block_acti["qkv"],num_heads = num_heads,vlm=vlm)
                 
-                if vlm =='Fuyu':
+                if vlm in ['Fuyu','instruct_blip']:
                     layer_output_v = layer_output_v.permute(0,2,1,3)
+                
+                elif lambda_n != 0:
+                    print(layer_output_v[0,list_patches].shape)
+                    raise Exception("check if value is correctly formatted!")
+                
                 if lambda_e !=0:
                             loss_e += entropy_loss(layer_output_v).to(loss_a.device)
                 if lambda_n !=0:
-                                loss_n += layer_output_v[0,:,list_patches].norm(dim=1).mean().to(loss_a.device)
-                if lambda_pre_proj!=0:
-                            loss_proj += block_acti["proj"][0,:,list_patches].norm(dim=1).mean().to(loss_a.device)
+                                loss_n += layer_output_v[0,list_patches].norm(dim=-1).mean().to(loss_a.device)
                         
                         
             if lambda_p !=0:
                 loss_p += (init_im - im).norm()
                         
-            loss = lambda_a*loss_a + lambda_e*loss_e + lambda_n*loss_n + lambda_p*loss_p + lambda_pre_proj*loss_proj
+            loss = lambda_a*loss_a + lambda_e*loss_e + lambda_n*loss_n + lambda_p*loss_p 
             
             loss.backward(retain_graph=True)
             
@@ -421,14 +426,13 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=
 
             for channel in range(3):
                 im[:,channel,:].data.clamp_((0-means[channel])/stds[channel], (1-means[channel])/stds[channel])
-                
-            im.data.clamp_(init_im - p_budget, init_im + p_budget)
+            if p_budget is not None:
+                im.data.clamp_(init_im - p_budget, init_im + p_budget)
             loss_hist.append(epoch_loss)
             loss_hist_a.append(loss_a.item())
             loss_hist_e.append(loss_e.item())
             loss_hist_n.append(loss_n.item())
             loss_hist_p.append(loss_p.item())
-            loss_hist_proj.append(loss_proj.item())
 
             early_stopping(epoch_loss, image)
             if early_stopping.early_stop:
@@ -452,8 +456,6 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=
                     loss_dict["norm"]=loss_hist_n
                 if lambda_p !=0:
                     loss_dict["p"]=loss_hist_p
-                if lambda_pre_proj !=0:
-                    loss_dict["proj"]=loss_hist_proj
                 
                 plot_losses(loss_dict,save_loss=True,path = f"{path}/hist/{img_name}")
                     
