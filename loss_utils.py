@@ -78,9 +78,8 @@ def self_attention_MH(activations={}, num_heads=16, dropout_rate=0, vlm = None, 
         attn_output = attn_output.reshape(batch_size, seq_len, model.config.hidden_size)
         
         proj_result, attention_weights = attn_output, attn_weights
-
-    
-    if vlm == "Llava-7b":
+        
+    if vlm == "Llava-7b" or vlm == "CLIP":
         layer_output_v = activations['V']
         layer_output_k = activations['K']
         layer_output_q = activations['Q']
