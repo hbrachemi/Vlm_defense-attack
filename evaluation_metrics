@@ -31,11 +31,18 @@ with open('ImageNetLabels.pkl', 'rb') as file:
 	GT_data = pickle.load(file) 
 
 
-def evaluate_image_context(model,processor,label,path_img):
+def evaluate_image_context(model,processor,label,path_img,vlm):
     
     image = Image.open(f"{path_img}")
-    
-    prompt = f"USER: <image> \nHow would you describe the image without the {label}?\nASSISTANT:"
+    if vlm == 'Llava-7b':
+        prompt = f"USER: <image> \nHow would you describe the image without the {label}?\nASSISTANT:"
+    if vlm == 'Blip-2':
+        prompt = f"Question: How would you describe the image without the {label}?.Answer:"
+    if vlm == 'Instruct-blip':
+        prompt = f"How would you describe the image without the {label}?"
+    if vlm is None:
+        prompt = f"How would you describe the image without the {label}?"
+
     inputs = processor(text = prompt, images = image, return_tensors="pt").to(model.device)
     inputs = {key: tensor.to(model.device) for key, tensor in inputs.items()}
         
