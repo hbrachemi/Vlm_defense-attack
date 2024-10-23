@@ -219,7 +219,7 @@ def generate_adv_image_(image,label,boxes,model,processor,optimizer,lr,p_budget=
                 if vlm in ['Fuyu','instruct_blip','Blip-2']:
                     layer_output_v = layer_output_v.permute(0,2,1,3)
                 
-                elif lambda_n != 0:
+                elif lambda_n != 0 and vlm != 'Llava-7b':
                     print(layer_output_v.shape)
                     print(len(list_patches))
                     print(layer_output_v[0,list_patches].shape)
