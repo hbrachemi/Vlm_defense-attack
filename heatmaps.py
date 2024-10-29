@@ -32,7 +32,7 @@ def rollout(attentions, discard_ratio, head_fusion,device):
             a = (attention_heads_fused + 1.0*I)/2
             a = a / a.sum(dim=-1)
 
-            result = torch.matmul(a, result)    
+            result = torch.matmul(a, result).to(device) 
     mask = result[0, 0 , 1 :]
     width = int(mask.size(-1)**0.5)
     mask = mask.reshape(width, width).numpy()
