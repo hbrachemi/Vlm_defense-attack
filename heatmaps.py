@@ -1,10 +1,14 @@
+# -----------------------------------------------------
+# Code adapted from https://github.com/jacobgil/vit-explain
+# Original file: vit_rollout.py
+# -----------------------------------------------------
+
 import torchvision
 import cv2
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import torch
-
 
 
 
