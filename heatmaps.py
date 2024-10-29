@@ -41,7 +41,7 @@ def rollout(attentions, discard_ratio, head_fusion):
 
 
 
-def plot_heatmaps(pil_im,processor,vision_model,max_layer=-1,min_max_mean="min",patch_dim=32,alpha=0.6,device=None):
+def plot_heatmaps(pil_im,processor,vision_model,max_layer=-1,min_max_mean="min",patch_dim=32,alpha=0.6,device=None,plot_bar=True):
     inputs = processor(images=pil_im,text="<image>", return_tensors="pt").to(device)
     
     with torch.no_grad():
@@ -53,8 +53,9 @@ def plot_heatmaps(pil_im,processor,vision_model,max_layer=-1,min_max_mean="min",
     final_attention_resized = cv2.resize(final_attention, (im.shape[-2], im.shape[-1]))
     
     plt.imshow(pil_im)
-    hm = plt.imshow(final_attention_resized, cmap='viridis', alpha=0.6)  
-    cbar = plt.colorbar(hm)
-    cbar.set_label('Intensity')
+    hm = plt.imshow(final_attention_resized, cmap='viridis', alpha=alpha)  
+    if plot_bar:
+        cbar = plt.colorbar(hm)
+        cbar.set_label('Intensity')
     plt.axis('off')
     plt.show()
