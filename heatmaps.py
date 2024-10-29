@@ -8,7 +8,7 @@ import torch
 
 
 
-def rollout(attentions, discard_ratio, head_fusion):
+def rollout(attentions, discard_ratio, head_fusion,device):
     result = torch.eye(attentions[0].size(-1))
     with torch.no_grad():
         for attention in attentions:
@@ -28,7 +28,7 @@ def rollout(attentions, discard_ratio, head_fusion):
             indices = indices[indices != 0]
             flat[0, indices] = 0
 
-            I = torch.eye(attention_heads_fused.size(-1))
+            I = torch.eye(attention_heads_fused.size(-1)).to(device)
             a = (attention_heads_fused + 1.0*I)/2
             a = a / a.sum(dim=-1)
 
@@ -48,7 +48,7 @@ def plot_heatmaps(pil_im,processor,vision_model,max_layer=-1,min_max_mean="min",
         im = inputs["pixel_values"]
         outputs = vision_model(im, output_attentions=True)
     attention_maps = outputs.attentions
-    mask = rollout(attention_maps[:max_layer],0,min_max_mean)
+    mask = rollout(attention_maps[:max_layer],0,min_max_mean,device)
     final_attention = mask.reshape(im.shape[-2]//patch_dim, im.shape[-1]//patch_dim)
     final_attention_resized = cv2.resize(final_attention, (im.shape[-2], im.shape[-1]))
     
