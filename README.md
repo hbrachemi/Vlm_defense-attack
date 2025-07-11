@@ -1,5 +1,5 @@
 # VIP: Visual Information Protection through Adversarial Attacks on Vision-Language Models
-This code provides a PyTorch implementation of the paper titled **VIP: Visual Information Protection through Adversarial Attacks on Vision-Language Models** (Full paper is available at: arxiv link). 
+This code provides a PyTorch implementation of the paper titled **VIP: Visual Information Protection through Adversarial Attacks on Vision-Language Models** (Full paper will be soon available at: arxiv). 
 <p align="center">
   <img src="proposed_.png" alt="Alt Proposed attack" style="width:70%; height:auto;">
 </p>
