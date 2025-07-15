@@ -1,5 +1,5 @@
 # VIP: Visual Information Protection through Adversarial Attacks on Vision-Language Models
-This code provides a PyTorch implementation of the paper titled **VIP: Visual Information Protection through Adversarial Attacks on Vision-Language Models** (Full paper will be soon available at: arxiv). 
+This code provides a PyTorch implementation of the paper titled **VIP: Visual Information Protection through Adversarial Attacks on Vision-Language Models** (Full paper is available at: [arxiv](https://arxiv.org/abs/2507.08982)). 
 
 **TL;DR:** We propose to leverage an adversarial attack for privacy protection. This code enables concealing sensitive or private visual aspects of an image to VLMs without compromising its remaining image semantics to maintain a good privacy utility trade off. 
 <p align="center">
